@@ -4,6 +4,7 @@ import datetime
 import tempfile
 from dataclasses import dataclass
 from typing import Dict, Any, List, Optional, Tuple
+import re
 
 # ---------------------------------------------------------
 # ENGINEERING NOTE: Ensure you have these installed:
@@ -761,27 +762,67 @@ def main():
         return method_ref, operator, op_notes
 
 
+    def pdf_safe_text(text: str) -> str:
+        if text is None:
+            return ""
+        # normalize common unicode that breaks latin-1 / fpdf fonts
+        s = str(text)
+        s = (s.replace("\u2014", "-")   # em dash
+            .replace("\u2013", "-")   # en dash
+            .replace("\u2212", "-")   # minus sign
+            .replace("\u00A0", " ")   # non-breaking space
+        )
+        # also avoid other sneaky whitespace
+        s = s.replace("\t", " ")
+        return s
 
-    def pdf_operator_block(pdf: AnalyticalReportPDF, theme: Theme, operator: str, notes: str, title: str = "Analysis Notes"):
+    def _soft_wrap_unbreakable(s: str, every: int = 60) -> str:
+        """
+        Inserts break opportunities into very long runs (URLs, pasted Excel blobs, etc.)
+        so fpdf2 can wrap them.
+        """
+        if not s:
+            return ""
+    # Break very long "words" (no spaces) by injecting a zero-width space marker.
+        # fpdf doesn't u    nderstand ZWSP, so we insert a normal space after chunks.
+        def break_word(m):
+            w = m.group(0)
+            return " ".join(w[i:i+every] for i in range(0, len(w), every))
+        return re.sub(r"\S{%d,}" % (every + 1), break_word, s)
+
+    def pdf_operator_block(pdf: AnalyticalReportPDF, theme: Theme, operator: str, notes: str,
+                        title: str = "Analysis Notes"):
         operator = (operator or "").strip()
         notes = (notes or "").strip()
         if not operator and not notes:
             return
+
+        # ✅ Critical: start at left margin so remaining width is never near-zero
+        pdf.set_x(pdf.l_margin)
+
+        # ✅ Use explicit width instead of w=0
+        w = pdf.w - pdf.l_margin - pdf.r_margin
+
         pdf.set_font(theme.font_main, "B", 9)
         pdf.set_text_color(*theme.text_dark)
-        pdf.cell(0, 6, pdf_safe_text(f"{title}:"), 0, 1)
-        pdf.set_font(theme.font_main, "", 9)
-        if operator:
-            pdf.multi_cell(0, 5, pdf_safe_text(f"Operator: {operator}"))
-        if notes:
-            pdf.multi_cell(0, 5, pdf_safe_text(f"Notes: {notes}"))
-        pdf.ln(2)
+        pdf.cell(w, 6, pdf_safe_text(f"{title}:"), 0, 1)
 
-    # NEW: Clickable Boxes instead of Dropdown
-    # We create a dictionary to store boolean states
-    col1, col2, col3, col4 = st.columns(4)
-    
-    technique_flags = {}
+        pdf.set_font(theme.font_main, "", 9)
+
+        if operator:
+            pdf.set_x(pdf.l_margin)
+            pdf.multi_cell(w, 5, pdf_safe_text(f"Operator: {operator}"))
+
+        if notes:
+            safe_notes = pdf_safe_text(notes)
+            safe_notes = _soft_wrap_unbreakable(safe_notes, every=70)
+
+            pdf.set_x(pdf.l_margin)
+            pdf.multi_cell(w, 5, pdf_safe_text(f"Notes: {safe_notes}"))
+
+        pdf.ln(2)
+        pdf.set_text_color(*theme.text_dark)
+
     
     with col1:
         technique_flags["ICP-OES"] = st.checkbox("ICP-OES (Chemistry)") #done
