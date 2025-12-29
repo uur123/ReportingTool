@@ -760,7 +760,7 @@ def main():
         op_notes = c2.text_area("Operator notes (short)", key=f"{key_prefix}_opnotes", height=70)
 
         return method_ref, operator, op_notes
-
+    
 
     def pdf_safe_text(text: str) -> str:
         if text is None:
@@ -783,8 +783,8 @@ def main():
         """
         if not s:
             return ""
-    # Break very long "words" (no spaces) by injecting a zero-width space marker.
-        # fpdf doesn't u    nderstand ZWSP, so we insert a normal space after chunks.
+        # Break very long "words" (no spaces) by injecting a zero-width space marker.
+        # fpdf doesn't understand ZWSP, so we insert a normal space after chunks.
         def break_word(m):
             w = m.group(0)
             return " ".join(w[i:i+every] for i in range(0, len(w), every))
@@ -823,6 +823,12 @@ def main():
         pdf.ln(2)
         pdf.set_text_color(*theme.text_dark)
 
+
+    # NEW: Clickable Boxes instead of Dropdown
+    # We create a dictionary to store boolean states
+    col1, col2, col3, col4 = st.columns(4)
+    
+    technique_flags = {}
     
     with col1:
         technique_flags["ICP-OES"] = st.checkbox("ICP-OES (Chemistry)") #done
