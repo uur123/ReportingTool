@@ -76,8 +76,10 @@ class AnalyticalReportPDF(FPDF):
         #self.cell(0, 5, f"Req: {req_name} | {self.meta.get('report_date')}", 0, 1, "R")
 
     # 4) Logo (top-right) — place it BEFORE drawing divider line
-        logo_path = self.meta.get("logo_path")
-        if logo_path and os.path.exists(logo_path):
+        #logo_path = self.meta.get("logo_path")
+        logo_path = "static/logo2.png
+        #if logo_path and os.path.exists(logo_path):
+        if os.path.exists(logo_path)
             try:
                 # Keep it in the header block, not drifting into body
                 x_logo = self.w - self.r_margin - 28  # width-ish reservation
@@ -454,6 +456,28 @@ def get_image_size(path: str) -> Optional[Tuple[int, int]]:
         return w, h
     except Exception:
         return None
+        
+def clean_numeric_string(s: str) -> str:
+    """
+    Normalizes number strings from Excel.
+    Example: '1.234,56' -> '1234.56'
+    Example: '1,234.56' -> '1234.56'
+    """
+    if not isinstance(s, str):
+        return s
+    
+    s = s.strip()
+    # Check if it looks like a number with European formatting (1.000,00)
+    if re.match(r'^-?\d+(\.\d{3})*,\d+$', s):
+        s = s.replace('.', '').replace(',', '.')
+    # Check if it looks like US formatting (1,000.00)
+    elif re.match(r'^-?\d+(,\d{3})*\.\d+$', s):
+        s = s.replace(',', '')
+    # If it's just a comma decimal (1234,56)
+    elif ',' in s and '.' not in s:
+        s = s.replace(',', '.')
+        
+    return s
     
 def save_upload_as_jpg(uploaded_file) -> Optional[str]:
     if uploaded_file is None:
@@ -585,47 +609,75 @@ def default_gsa_df() -> pd.DataFrame:
         {"Metric": "n fields", "Value": "", "Unit": "", "Notes": ""},
     ])
 
+
 def parse_excel_paste(text: str) -> Optional[pd.DataFrame]:
     """
-    Parse pasted Excel/Sheets ranges (TSV typically).
-    Supports tab-separated, comma-separated, semicolon-separated.
-    Returns DataFrame or None.
+    Parses pasted text from Excel/Sheets. 
+    1. Detects delimiters (Tab, Semicolon, Comma).
+    2. Normalizes numbers (handles 1.234,56 vs 1,234.56).
+    3. Returns a clean DataFrame.
     """
     if not text or not text.strip():
         return None
 
-    s = text.strip("\n\r ")
-    lines = s.splitlines()
-    if not lines:
-        return None
-
-    first_line = lines[0]
-
+    # --- STEP 1: DETECT SEPARATOR ---
+    # Excel clipboard data is almost always Tab-separated (\t)
+    s = text.strip()
+    first_line = s.splitlines()[0]
+    
     if "\t" in first_line:
         sep = "\t"
-    elif ";" in first_line and first_line.count(";") >= first_line.count(","):
+    elif ";" in first_line:
         sep = ";"
     else:
         sep = ","
 
-    # Try with header
+    # --- STEP 2: LOAD INITIAL DATAFRAME ---
     try:
-        df = pd.read_csv(io.StringIO(s), sep=sep, engine="python")
-        if isinstance(df, pd.DataFrame) and not df.empty:
-            return df
-    except Exception:
-        pass
-
-    # Fallback: no header
-    try:
-        df = pd.read_csv(io.StringIO(s), sep=sep, header=None, engine="python")
-        if isinstance(df, pd.DataFrame) and not df.empty:
-            df.columns = [f"Col {i+1}" for i in range(df.shape[1])]
-            return df
+        # We read everything as strings initially to avoid pandas 
+        # making wrong guesses before we clean the punctuation
+        df = pd.read_csv(io.StringIO(s), sep=sep, dtype=str, engine="python")
     except Exception:
         return None
 
-    return None
+    # --- STEP 3: SMART NUMERIC CLEANING ---
+    def normalize_number(val):
+        if not isinstance(val, str):
+            return val
+        
+        val = val.strip()
+        
+        # Remove currency symbols or whitespace often found in Excel
+        val = re.sub(r'[^\d,.\-]', '', val)
+        
+        if not val:
+            return val
+
+        # Logic for Punctuation:
+        # Case A: 1.234,56 (European) -> Remove dot, replace comma with dot
+        if '.' in val and ',' in val:
+            if val.find('.') < val.find(','):
+                val = val.replace('.', '').replace(',', '.')
+            # Case B: 1,234.56 (US/UK) -> Remove comma
+            else:
+                val = val.replace(',', '')
+        
+        # Case C: 1234,56 (Simple European) -> Replace comma with dot
+        elif ',' in val:
+            val = val.replace(',', '.')
+            
+        return val
+
+    # Apply cleaning to every cell
+    for col in df.columns:
+        # Clean the string formatting
+        cleaned_col = df[col].apply(normalize_number)
+        
+        # Try to convert to numeric, but leave as string if it's a text column
+        # (errors='ignore' ensures 'Sample Name' remains 'Sample Name')
+        df[col] = pd.to_numeric(cleaned_col, errors='ignore')
+
+    return df
 
 def editor_with_excel_paste(
     *,
