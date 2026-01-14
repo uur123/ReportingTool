@@ -65,9 +65,10 @@ class AnalyticalReportPDF(FPDF):
         #logo_pad_x = 2.0
 
     # 1) Lab name (left)
-        self.set_font(t.font_main, "B", 14)
+        self.set_font(t.font_main, "B", 13)
         self.set_text_color(*t.primary)
-        self.set_xy(self.l_margin, y_top)
+        #self.set_xy(self.l_margin, y_top)
+        self.set_xy(0,0)
         #self.cell(110, 8, self.meta.get("lab_name", "Lab"), 0, 0, "L")
         self.cell(110, 8, "Technical Service Report", 0, 0, "C")
 
@@ -98,7 +99,7 @@ class AnalyticalReportPDF(FPDF):
                 pass
 
     # 5) Divider line below logos/subheader
-        y_line = y_top + 10  # sits below subheader and logo
+        y_line = y_top + 11  # sits below subheader and logo
         self.set_draw_color(*t.primary)
         self.set_line_width(0.5)
         self.line(self.l_margin, y_line, self.w - self.r_margin, y_line)
