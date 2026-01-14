@@ -68,7 +68,7 @@ class AnalyticalReportPDF(FPDF):
         self.set_font(t.font_main, "B", 13)
         self.set_text_color(*t.primary)
         #self.set_xy(self.l_margin, y_top)
-        self.set_xy(0,0)
+        self.set_xy(0,y_top)
         #self.cell(110, 8, self.meta.get("lab_name", "Lab"), 0, 0, "L")
         self.cell(110, 8, "Technical Service Report", 0, 0, "C")
 
