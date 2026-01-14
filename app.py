@@ -49,6 +49,16 @@ class AnalyticalReportPDF(FPDF):
     def header(self):
         t = self.theme
 
+        # --- 1) TOP CONFIDENTIAL STRIPE ---
+        # Draw a gray rectangle from (0,0) to full width, 8mm high
+        self.set_fill_color(220, 220, 220) # Light Grey
+        self.rect(0, 0, self.w, 8, style="F")
+    
+        self.set_font(t.font_main, "B", 7)
+        self.set_text_color(100, 100, 100) # Darker grey text
+        self.set_xy(0, 0)
+        self.cell(self.w, 8, "INTERNAL USE ONLY - CONFIDENTIAL", 0, 0, "C")
+
         # --- Fixed header geometry (professional + predictable) ---
         y_top = 10.0
         logo_h = 10.0
@@ -59,7 +69,7 @@ class AnalyticalReportPDF(FPDF):
         self.set_text_color(*t.primary)
         self.set_xy(self.l_margin, y_top)
         #self.cell(110, 8, self.meta.get("lab_name", "Lab"), 0, 0, "L")
-        self.cell(110, 8, "Technical Service Report", 0, 0, "L")
+        self.cell(110, 8, "Technical Service Report", 0, 0, "C")
 
     # 2) Report ID (right)
         #self.set_font(t.font_mono, "", 9)
@@ -88,7 +98,7 @@ class AnalyticalReportPDF(FPDF):
                 pass
 
     # 5) Divider line below logos/subheader
-        y_line = y_top + 12.5  # sits below subheader and logo
+        y_line = y_top + 10  # sits below subheader and logo
         self.set_draw_color(*t.primary)
         self.set_line_width(0.5)
         self.line(self.l_margin, y_line, self.w - self.r_margin, y_line)
