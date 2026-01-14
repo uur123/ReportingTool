@@ -79,7 +79,7 @@ class AnalyticalReportPDF(FPDF):
         #logo_path = self.meta.get("logo_path")
         logo_path = "static/logo2.png"
         #if logo_path and os.path.exists(logo_path):
-        if os.path.exists(logo_path)
+        if os.path.exists(logo_path):
             try:
                 # Keep it in the header block, not drifting into body
                 x_logo = self.w - self.r_margin - 28  # width-ish reservation
