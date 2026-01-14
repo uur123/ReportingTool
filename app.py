@@ -77,7 +77,7 @@ class AnalyticalReportPDF(FPDF):
 
     # 4) Logo (top-right) — place it BEFORE drawing divider line
         #logo_path = self.meta.get("logo_path")
-        logo_path = "static/logo2.png
+        logo_path = "static/logo2.png"
         #if logo_path and os.path.exists(logo_path):
         if os.path.exists(logo_path)
             try:
