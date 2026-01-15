@@ -689,6 +689,88 @@ def parse_excel_paste(text: str) -> Optional[pd.DataFrame]:
 
     return df
 
+
+def comparison_matrix_editor(
+    *,
+    default_df: pd.DataFrame,
+    editor_key: str,
+    label: str,
+    selected_techniques: List[str],
+) -> pd.DataFrame:
+    """
+    Comparison Matrix table editor:
+    - No always-visible paste box
+    - Optional import from Excel clipboard in a popover/expander
+    - Add column button
+    - Rename columns via inputs
+    """
+    store_key = f"{editor_key}__df"
+    df_current = st.session_state.get(store_key)
+
+    if not isinstance(df_current, pd.DataFrame) or df_current.empty:
+        df_current = default_df.copy()
+
+    # ---- Controls row ----
+    c1, c2, c3 = st.columns([1, 1, 4])
+
+    # Add new column
+    if c1.button("➕ Add column", key=f"{editor_key}__add_col"):
+        new_col = f"New column {len(df_current.columns) + 1}"
+        df_current[new_col] = ""
+
+    # Optional import (hidden/compact UI)
+    # Prefer popover if available; fallback to expander.
+    imported = None
+    try:
+        pop = st.popover("📋 Import from Excel", use_container_width=False)
+        with pop:
+            txt = st.text_area("Paste copied Excel range here", key=f"{editor_key}__import_txt", height=120)
+            if st.button("Import", key=f"{editor_key}__import_btn"):
+                imported = parse_excel_paste(txt)
+    except Exception:
+        with c2:
+            with st.expander("📋 Import from Excel", expanded=False):
+                txt = st.text_area("Paste copied Excel range here", key=f"{editor_key}__import_txt", height=120)
+                if st.button("Import", key=f"{editor_key}__import_btn"):
+                    imported = parse_excel_paste(txt)
+
+    if imported is not None:
+        if isinstance(imported, pd.DataFrame) and not imported.empty:
+            df_current = imported
+        else:
+            st.warning("Import failed. Copy a rectangular range (including headers) and try again.")
+
+    # ---- Rename columns UI ----
+    st.markdown("**Rename columns**")
+    rename_cols = st.columns(min(len(df_current.columns), 6))  # wrap if many cols
+    new_names = []
+    for i, col in enumerate(df_current.columns):
+        col_container = rename_cols[i % len(rename_cols)]
+        new_name = col_container.text_input(
+            label=f"col_{i}",
+            value=str(col),
+            key=f"{editor_key}__colname_{i}",
+            label_visibility="collapsed",
+        )
+        new_names.append(new_name.strip() or str(col))
+
+    if new_names != list(df_current.columns):
+        df_current = df_current.copy()
+        df_current.columns = new_names
+
+    # ---- Table editor ----
+    df_out = st.data_editor(
+        df_current,
+        num_rows="dynamic",
+        use_container_width=True,
+        key=editor_key,
+    )
+    st.session_state[store_key] = df_out
+    return df_out
+
+
+
+
 def editor_with_excel_paste(
     *,
     default_df: pd.DataFrame,
