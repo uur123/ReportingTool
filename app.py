@@ -1530,10 +1530,15 @@ def main():
             method_sop = (d.get("method_ref") or "").strip()
             if tech == "Comparison Matrix":
                 tables = d.get("tables") or []
-                if tables:
-                    mu = (tables[0].get("method_used") or "").strip()
-                    if mu:
-                        method_sop = mu  # summarize first table's method
+                used = []
+                for b in tables:
+                    tname = (b.get("technique") or "").strip()
+                    if tname:
+                        used.append(tname)
+                used = sorted(set(used))
+                if used:
+                    method_sop = ", ".join(used)
+
 
             tech_rows.append({
                 "Technique": tech,
@@ -1611,14 +1616,19 @@ def main():
                     if df_cmp is None or df_cmp.empty:
                         continue
 
-                    method_used = (block.get("method_used") or "").strip()
-                    table_title = (block.get("title") or "").strip()
+                    #method_used = (block.get("method_used") or "").strip()
+                    #table_title = (block.get("title") or "").strip()
 
-                    ensure_space(pdf, 14.0 + estimate_table_height_mm(df_cmp))
+                    #ensure_space(pdf, 14.0 + estimate_table_height_mm(df_cmp))
 
+                    #pdf.set_font(theme.font_main, "B", 10)
+                    #pdf.set_text_color(*theme.text_dark)
+                    #pdf.cell(0, 6, pdf_safe_text(f"Method used: {method_used or '-'}"), 0, 1, "L")
+
+                    tech_used = (block.get("technique") or "").strip()
                     pdf.set_font(theme.font_main, "B", 10)
                     pdf.set_text_color(*theme.text_dark)
-                    pdf.cell(0, 6, pdf_safe_text(f"Method used: {method_used or '-'}"), 0, 1, "L")
+                    pdf.cell(0, 6, pdf_safe_text(f"{tech_used or 'Technique'} selected"), 0, 1, "L")
 
                     if table_title:
                         pdf.set_font(theme.font_main, "I", 9)
