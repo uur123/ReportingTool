@@ -1307,12 +1307,17 @@ def main():
                 "op_notes": op_notes,
             }
     # --- MODULE: Comparison Matrix (MULTI TABLES + Excel paste) ---
+    # --- MODULE: Comparison Matrix (MULTI TABLES, per-technique, no big paste area) ---
     if technique_flags["Comparison Matrix"]:
         with st.expander("📋 Comparison Matrix", expanded=True):
-            st.caption("Add one or more comparison tables. Each table can have its own 'Method used' label and can be populated by pasting from Excel.")
+            st.caption("Add one or more comparison tables. Each table can be linked to a selected analysis technique.")
 
             if "cmp_tables_n" not in st.session_state:
                 st.session_state.cmp_tables_n = 1
+
+            selected_techniques_now = [k for k, v in technique_flags.items() if v and k != "Comparison Matrix"]
+            if not selected_techniques_now:
+                selected_techniques_now = ["Other"]
 
             cbtn1, cbtn2, _ = st.columns([1, 1, 4])
             if cbtn1.button("➕ Add table", key="cmp_add_table"):
@@ -1325,29 +1330,33 @@ def main():
             for i in range(st.session_state.cmp_tables_n):
                 st.markdown(f"#### Comparison Table {i+1}")
 
-                method_used = st.text_input(
-                    "Method used (printed above this table in PDF)",
-                    value="",
-                    key=f"cmp_method_used_{i}"
+                cA, cB = st.columns([1.2, 2.8])
+
+                tech_choice = cA.selectbox(
+                    "Analysis technique",
+                    options=selected_techniques_now + (["Other"] if "Other" not in selected_techniques_now else []),
+                    key=f"cmp_tech_{i}",
                 )
 
-                table_title = st.text_input(
+                tech_other = ""
+                if tech_choice == "Other":
+                    tech_other = cA.text_input("Technique name", value="", key=f"cmp_tech_other_{i}")
+
+                table_title = cB.text_input(
                     "Table title (optional)",
                     value="",
                     key=f"cmp_title_{i}"
                 )
 
-                df_cmp = editor_with_excel_paste(
+                df_cmp = comparison_matrix_editor(
                     default_df=default_comparison_df(),
                     editor_key=f"cmp_df_{i}",
-                    paste_key=f"cmp_paste_{i}",
-                    label="Paste this comparison table from Excel (optional)",
-                    apply_button_text="Apply paste to this comparison table",
-                    use_expander=False
+                    label=f"Comparison table {i+1}",
+                    selected_techniques=selected_techniques_now,
                 )
 
                 cmp_tables.append({
-                    "method_used": method_used,
+                    "technique": tech_other.strip() if tech_choice == "Other" else tech_choice,
                     "title": table_title,
                     "table": df_cmp
                 })
@@ -1366,6 +1375,8 @@ def main():
                 "operator": operator,
                 "op_notes": op_notes,
             }
+
+    
         
     # --- MODULE: Chemical analysis (grouped, multiple sub-methods) ---
     chem_selected = [m for m in CHEM_METHODS if technique_flags.get(m)]
