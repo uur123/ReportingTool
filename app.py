@@ -7,17 +7,14 @@ from dataclasses import dataclass
 from typing import Dict, Any, List, Optional, Tuple
 import re
 
-# ---------------------------------------------------------
-# ENGINEERING NOTE: Ensure you have these installed:
+# Required packages:
 # pip install streamlit pandas fpdf2 Pillow
-# ---------------------------------------------------------
 import pandas as pd
 import streamlit as st
 from PIL import Image
 from fpdf import FPDF
 
 
-# 0) GLOBAL
 # -----------------------------------------------------------------------------
 ALL_MEASUREMENT_TECHNIQUES = [
     "ICP-OES",
@@ -38,27 +35,21 @@ ALL_MEASUREMENT_TECHNIQUES = [
 
 
 # ==============================================================================
-# 1. DESIGN SYSTEM (The "Face")
+# THEME / PDF ENGINE
 # ==============================================================================
 @dataclass
 class Theme:
-    # Colors (R, G, B)
-    primary: Tuple[int, int, int] = (26, 43, 60)  # Deep Navy (Brand)
-    header_fill: Tuple[int, int, int] = (230, 235, 240)  # Table Header
-    zebra_fill: Tuple[int, int, int] = (250, 250, 250)  # Table Stripe
+    primary: Tuple[int, int, int] = (26, 43, 60)
+    header_fill: Tuple[int, int, int] = (230, 235, 240)
+    zebra_fill: Tuple[int, int, int] = (250, 250, 250)
     text_dark: Tuple[int, int, int] = (30, 30, 30)
     text_gray: Tuple[int, int, int] = (100, 100, 100)
     border_gray: Tuple[int, int, int] = (200, 200, 200)
-
-    # Typography & Sizing
     font_main: str = "Helvetica"
     font_mono: str = "Courier"
     margin_mm: float = 25.0
 
 
-# ==============================================================================
-# 2. PDF ENGINE (The "Core")
-# ==============================================================================
 class AnalyticalReportPDF(FPDF):
     def __init__(self, theme: Theme, meta: Dict[str, Any]):
         super().__init__()
@@ -71,20 +62,18 @@ class AnalyticalReportPDF(FPDF):
     def header(self):
         t = self.theme
 
-        # --- Top stripe with confidentiality note (single banner at very top) ---
-        self.set_fill_color(220, 220, 220)  # Light Grey
+        # single top stripe banner
+        self.set_fill_color(220, 220, 220)
         self.rect(0, 0, self.w, 8, style="F")
 
         self.set_font(t.font_main, "B", 7)
         self.set_text_color(100, 100, 100)
         self.set_xy(0, 0)
-        # Use pdf_safe_text to ensure latin-1 safety
         self.cell(self.w, 8, pdf_safe_text("INTERNAL USE ONLY - CONFIDENTIAL"), 0, 0, "C")
 
-        # Header title + optional logo
+        # title + optional logo
         y_top = 10.0
         logo_h = 10.0
-
         self.set_font(t.font_main, "B", 13)
         self.set_text_color(*t.primary)
         self.set_xy(self.l_margin, y_top)
@@ -98,13 +87,12 @@ class AnalyticalReportPDF(FPDF):
             except Exception:
                 pass
 
-        # Divider
+        # divider
         y_line = y_top + 11
         self.set_draw_color(*t.primary)
         self.set_line_width(0.5)
         self.line(self.l_margin, y_line, self.w - self.r_margin, y_line)
 
-        # Reserve header height
         self.set_y(y_line + 6.0)
 
     def subtitle(self, title: str):
@@ -162,7 +150,6 @@ class AnalyticalReportPDF(FPDF):
         self.line(self.l_margin, self.get_y(), self.w - self.r_margin, self.get_y())
 
         page_str = f"Page {self.page_no()}/{{nb}}"
-
         lab_name = (self.meta.get("lab_name") or "").strip() or "Analytical Lab"
         lab_mail = (self.meta.get("lab_mail") or "").strip()
 
@@ -171,7 +158,6 @@ class AnalyticalReportPDF(FPDF):
 
         row_w = self.w - self.l_margin - self.r_margin
         col_w = row_w / 3.0
-
         self.set_x(self.l_margin)
         self.cell(col_w, 5, pdf_safe_text(lab_name), 0, 0, "L")
         self.cell(col_w, 5, pdf_safe_text(lab_mail), 0, 0, "C")
@@ -191,7 +177,6 @@ class AnalyticalReportPDF(FPDF):
         t = self.theme
         if not items:
             return
-
         box_w = self.w - self.l_margin - self.r_margin
         x0 = self.l_margin
         y0 = self.get_y()
@@ -231,7 +216,6 @@ class AnalyticalReportPDF(FPDF):
             self.set_x(x0 + pad)
             y_row = cur_y + r * line_h
             self.set_y(y_row)
-
             for c in range(cols):
                 i = r + c * rows
                 if i >= len(items):
@@ -239,15 +223,12 @@ class AnalyticalReportPDF(FPDF):
                 label, value = items[i]
                 label = (label or "").strip()
                 value = (value or "").strip()
-
                 self.set_font(t.font_main, "B", 9)
                 self.set_text_color(*t.text_gray)
                 self.cell(label_w, line_h, pdf_safe_text(f"{label}:"), 0, 0, "L")
-
                 self.set_font(t.font_main, "", 9)
                 self.set_text_color(*t.text_dark)
                 self.cell(value_w, line_h, pdf_safe_text(value), 0, 0, "L")
-
             self.ln(line_h)
 
         self.set_y(y0 + box_h + 4.0)
@@ -256,13 +237,10 @@ class AnalyticalReportPDF(FPDF):
         t = self.theme
         if not rows:
             return
-
         df = pd.DataFrame(rows, columns=["Technique", "Method/SOP", "Output"])
-
         est_h = 7 + min(len(df), 10) * 7 + 10
         if self.get_y() + est_h > self.h - self.b_margin:
             self.add_page()
-
         if title:
             self.set_font(t.font_main, "B", 10)
             self.set_text_color(*t.text_dark)
@@ -285,20 +263,17 @@ class AnalyticalReportPDF(FPDF):
 
         self.set_font(t.font_main, "", 9)
         self.set_text_color(*t.text_dark)
-
         for i, row in df.iterrows():
             fill = (i % 2 == 1)
             if fill:
                 self.set_fill_color(*t.zebra_fill)
             else:
                 self.set_fill_color(255, 255, 255)
-
             vals = [str(row.get("Technique", "")), str(row.get("Method/SOP", "")), str(row.get("Output", ""))]
             for v, w in zip(vals, widths):
                 v = pdf_safe_text(v.replace("\n", " ").strip())
                 self.cell(w, 7, v, 0, 0, "C", True)
             self.ln()
-
         self.ln(2)
 
     def add_zebra_table(self, df: pd.DataFrame):
@@ -306,14 +281,12 @@ class AnalyticalReportPDF(FPDF):
             return
         t = self.theme
         col_width = (self.w - self.l_margin - self.r_margin) / len(df.columns)
-
         self.set_font(t.font_main, "B", 9)
         self.set_fill_color(*t.header_fill)
         self.set_text_color(*t.primary)
         for col in df.columns:
             self.cell(col_width, 7, pdf_safe_text(col), 0, 0, "C", True)
         self.ln()
-
         self.set_font(t.font_mono, "", 9)
         self.set_text_color(*t.text_dark)
         for i, row in df.iterrows():
@@ -334,23 +307,17 @@ class AnalyticalReportPDF(FPDF):
                 aspect = h_px / w_px
         except Exception:
             return
-
         max_w = self.w - self.l_margin - self.r_margin
         display_w = min(120, max_w)
         display_h = display_w * aspect
-
         if self.get_y() + display_h + 15 > self.h - t.margin_mm:
             self.add_page()
-
         x_pos = (self.w - display_w) / 2
         y_pos = self.get_y()
-
         self.image(img_path, x=x_pos, y=y_pos, w=display_w)
-
         self.set_draw_color(*t.border_gray)
         self.set_line_width(0.3)
         self.rect(x_pos, y_pos, display_w, display_h)
-
         self.set_y(y_pos + display_h + 2)
         if caption:
             self.set_font(t.font_main, "I", 8)
@@ -364,7 +331,7 @@ class AnalyticalReportPDF(FPDF):
 
 
 # ==============================================================================
-# 3. UTILITIES
+# UTILITIES (module-level)
 # ==============================================================================
 def ensure_space(pdf: FPDF, needed_mm: float):
     if pdf.get_y() + needed_mm > pdf.h - pdf.b_margin:
@@ -485,6 +452,37 @@ def technique_output_hint(name: str) -> str:
     return m.get(name, "-")
 
 
+# pdf_operator_block moved to module-level to avoid NameError at PDF time
+def pdf_operator_block(pdf: AnalyticalReportPDF, theme: Theme, operator: str, notes: str, title: str = "Analysis Notes"):
+    operator = (operator or "").strip()
+    notes = (notes or "").strip()
+    if not operator and not notes:
+        return
+
+    pdf.set_x(pdf.l_margin)
+    w = pdf.w - pdf.l_margin - pdf.r_margin
+
+    pdf.set_font(theme.font_main, "B", 9)
+    pdf.set_text_color(*theme.text_dark)
+    pdf.cell(w, 6, pdf_safe_text(f"{title}:"), 0, 1)
+
+    pdf.set_font(theme.font_main, "", 9)
+    if operator:
+        pdf.set_x(pdf.l_margin)
+        pdf.multi_cell(w, 5, pdf_safe_text(f"Operator: {operator}"))
+    if notes:
+        safe_notes = pdf_safe_text(notes)
+        # insert break opportunities for very long words
+        def break_word(m):
+            wv = m.group(0)
+            return " ".join(wv[i : i + 70] for i in range(0, len(wv), 70))
+        safe_notes = re.sub(r"\S{71,}", break_word, safe_notes)
+        pdf.set_x(pdf.l_margin)
+        pdf.multi_cell(w, 5, pdf_safe_text(f"Notes: {safe_notes}"))
+    pdf.ln(2)
+    pdf.set_text_color(*theme.text_dark)
+
+
 METHOD_HOURS = {
     "ICP-OES": 3.0,
     "XRF": 1.5,
@@ -602,37 +600,20 @@ def comparison_matrix_editor(*, default_df: pd.DataFrame, editor_key: str, label
         df_current = df_current.copy()
         df_current[new_col] = ""
     with c2:
-        try:
-            with st.popover("➖ Remove column", use_container_width=True):
-                st.caption("Select one or more columns to remove (at least 1 column must remain).")
-                cols_now = list(map(str, df_current.columns))
-                to_remove = st.multiselect("Columns to remove", options=cols_now, key=f"{editor_key}__rm_cols")
-                if st.button("Remove selected", key=f"{editor_key}__rm_cols_btn"):
-                    if not to_remove:
-                        st.info("No columns selected.")
+        with st.popover("➖ Remove column", use_container_width=True):
+            st.caption("Select one or more columns to remove (at least 1 column must remain).")
+            cols_now = list(map(str, df_current.columns))
+            to_remove = st.multiselect("Columns to remove", options=cols_now, key=f"{editor_key}__rm_cols")
+            if st.button("Remove selected", key=f"{editor_key}__rm_cols_btn"):
+                if not to_remove:
+                    st.info("No columns selected.")
+                else:
+                    remaining = [c for c in cols_now if c not in set(to_remove)]
+                    if len(remaining) < 1:
+                        st.warning("Cannot remove all columns. Keep at least one column.")
                     else:
-                        remaining = [c for c in cols_now if c not in set(to_remove)]
-                        if len(remaining) < 1:
-                            st.warning("Cannot remove all columns. Keep at least one column.")
-                        else:
-                            df_current = df_current.copy()
-                            df_current = df_current[remaining]
-        except Exception:
-            with st.expander("➖ Remove column", expanded=False):
-                st.caption("Select one or more columns to remove (at least 1 column must remain).")
-                cols_now = list(map(str, df_current.columns))
-                to_remove = st.multiselect("Columns to remove (expander)", options=cols_now, key=f"{editor_key}__rm_cols_fallback")
-                if st.button("Remove selected (expander)", key=f"{editor_key}__rm_cols_btn_fallback"):
-                    if not to_remove:
-                        st.info("No columns selected.")
-                    else:
-                        remaining = [c for c in cols_now if c not in set(to_remove)]
-                        if len(remaining) < 1:
-                            st.warning("Cannot remove all columns. Keep at least one column.")
-                        else:
-                            df_current = df_current.copy()
-                            df_current = df_current[remaining]
-
+                        df_current = df_current.copy()
+                        df_current = df_current[remaining]
     imported = None
     try:
         pop = st.popover("📋 Import from Excel", use_container_width=False)
@@ -646,24 +627,20 @@ def comparison_matrix_editor(*, default_df: pd.DataFrame, editor_key: str, label
                 txt = st.text_area("Paste copied Excel range here", key=f"{editor_key}__import_txt", height=120)
                 if st.button("Import", key=f"{editor_key}__import_btn"):
                     imported = parse_excel_paste(txt)
-
     if imported is not None:
         if isinstance(imported, pd.DataFrame) and not imported.empty:
             df_current = imported
         else:
             st.warning("Import failed. Copy a rectangular range (including headers) and try again.")
-
     st.markdown("**Rename columns**")
     cols_now = list(df_current.columns)
     wrap = min(max(len(cols_now), 1), 6)
     rename_cols = st.columns(wrap)
-
     new_names = []
     for i, col in enumerate(cols_now):
         col_container = rename_cols[i % wrap]
         new_name = col_container.text_input(label=f"col_{i}", value=str(col), key=f"{editor_key}__colname_{i}", label_visibility="collapsed")
         new_names.append(new_name.strip() or str(col))
-
     if new_names != list(map(str, df_current.columns)):
         seen = {}
         fixed = []
@@ -676,7 +653,6 @@ def comparison_matrix_editor(*, default_df: pd.DataFrame, editor_key: str, label
                 fixed.append(f"{name} ({seen[name]})")
         df_current = df_current.copy()
         df_current.columns = fixed
-
     df_out = st.data_editor(df_current, num_rows="dynamic", use_container_width=True, key=editor_key)
     st.session_state[store_key] = df_out
     return df_out
@@ -684,7 +660,6 @@ def comparison_matrix_editor(*, default_df: pd.DataFrame, editor_key: str, label
 
 def editor_with_excel_paste(*, default_df: pd.DataFrame, editor_key: str, paste_key: str, label: str = "Paste from Excel (optional)", apply_button_text: str = "Apply paste to table", help_text: str = "Copy a cell range in Excel/Sheets and paste here. Tabs/newlines are supported.", height: int = 140, use_expander: bool = True) -> pd.DataFrame:
     store_key = f"{editor_key}__df"
-
     def paste_ui():
         st.markdown(f"**{label}**")
         st.caption(help_text)
@@ -695,33 +670,29 @@ def editor_with_excel_paste(*, default_df: pd.DataFrame, editor_key: str, paste_
                 st.warning("Could not parse pasted data. Copy a rectangular range (rows/columns) and paste again.")
             else:
                 st.session_state[store_key] = df_new
-
     if use_expander:
         with st.expander(label, expanded=False):
             paste_ui()
     else:
         paste_ui()
-
     df_current = st.session_state.get(store_key)
     if not isinstance(df_current, pd.DataFrame) or df_current.empty:
         df_current = default_df
-
     df_out = st.data_editor(df_current, num_rows="dynamic", use_container_width=True, key=editor_key)
     st.session_state[store_key] = df_out
     return df_out
 
 
 # ==============================================================================
-# 4. STREAMLIT UI (The "Interaction")
+# STREAMLIT UI
 # ==============================================================================
 def main():
     st.set_page_config(page_title="EN-Report", layout="wide", page_icon="🔬", initial_sidebar_state="collapsed")
     if "report_data" not in st.session_state:
         st.session_state.report_data = {}
-
     st.markdown("<style>.stApp { background-color: #f8f9fa; }</style>", unsafe_allow_html=True)
 
-    # Sidebar / configuration
+    # Sidebar
     with st.sidebar:
         st.header("⚙️ Configuration")
         lab_name = st.text_input("Lab Name", "Global R&D Analytical Service Lab")
@@ -735,15 +706,15 @@ def main():
     st.title("🔬 Scientific Analysis Reporting Tool")
     st.markdown("---")
 
-    # 1. Header data / traceability
+    # 1. Sample Traceability
     st.subheader("1. Sample Traceability")
     with st.container():
-        c1, c2, c3, c4, c5 = st.columns([2, 2, 2, 2, 1])
+        c1, c2, c3, c4 = st.columns(4)
         project_title = c1.text_input("Project Title", "Benchmarking of HD1")
-        project_id = c2.text_input("Project ID", "", help="Mandatory")
-        requester = c3.text_input("Requester Name", "John Doe")
-        context = c4.selectbox("Context", ["R&D project", "Operational Support", "Casting Defect Analysis"])
-        sample_id = c5.text_input("TSR No", "XXXX")
+        # Project ID is the TSR No (sample_id) per your request — do not add a separate Project ID field
+        requester = c2.text_input("Requester Name", "John Doe")
+        context = c3.selectbox("Context", ["R&D project", "Operational Support", "Casting Defect Analysis"])
+        sample_id = c4.text_input("TSR No (Project ID)", "", help="Mandatory: this is used as Project ID")
 
     with st.container():
         c1, c2, c3 = st.columns(3)
@@ -757,7 +728,7 @@ def main():
     sample_photo = st.file_uploader("Upload sample photo (as received)", type=["jpg", "jpeg", "png", "tif", "tiff"], key="sample_photo")
     st.divider()
 
-    # 2. Technique selection
+    # 2. Techniques selection
     st.subheader("2. Select Analytical Techniques")
     def add_operator_fields(parent, key_prefix: str):
         parent.markdown("##### Operator traceability")
@@ -789,7 +760,7 @@ def main():
         technique_flags["F Analysis"] = st.checkbox("F Analysis")
         technique_flags["Comparison Matrix"] = st.checkbox("Comparison Matrix")
 
-    # Effort & cost
+    # Effort & cost (unchanged)
     st.subheader("3. Effort & Cost (optional)")
     default_hours = compute_default_hours(technique_flags, context)
     if "est_hours" not in st.session_state:
@@ -820,9 +791,8 @@ def main():
     report_data.clear()
 
     # -------------------------
-    # Dynamic data entry for techniques
+    # Data entry for each technique (behaviour preserved from previous version)
     # -------------------------
-    # ICP-OES
     if technique_flags.get("ICP-OES"):
         with st.expander("🧪 ICP-OES Data", expanded=True):
             c_a, c_b = st.columns([1, 3])
@@ -834,7 +804,6 @@ def main():
             method_ref, operator, op_notes = add_operator_fields(st.container(), key_prefix="ICP_OES")
             report_data["ICP-OES"] = {"meta": f"Mass: {mass}g | Volume: {volume} mL", "table": df_icp, "method_ref": method_ref, "operator": operator, "op_notes": op_notes}
 
-    # XRF
     if technique_flags.get("XRF"):
         with st.expander("🧪 XRF Data", expanded=True):
             c_a, c_b = st.columns([1, 3])
@@ -844,7 +813,6 @@ def main():
             method_ref, operator, op_notes = add_operator_fields(st.container(), key_prefix="XRF")
             report_data["XRF"] = {"table": df_xrf, "method_ref": method_ref, "operator": operator, "op_notes": op_notes}
 
-    # SEM-EDX
     if technique_flags.get("SEM-EDX"):
         with st.expander("🔬 SEM-EDX Data", expanded=True):
             c_a, c_b = st.columns(2)
@@ -856,7 +824,6 @@ def main():
             method_ref, operator, op_notes = add_operator_fields(st.container(), key_prefix="SEM-EDX")
             report_data["SEM-EDX"] = {"meta": f"Acc. Voltage: {kv}kV | WD: {wd}mm", "images": sem_files, "captions": sem_captions, "method_ref": method_ref, "operator": operator, "op_notes": op_notes}
 
-    # Optical
     if technique_flags.get("Optical"):
         with st.expander("📷 Optical Microscopy", expanded=True):
             etchant = st.text_input("Etchant Used", "Nital 3%")
@@ -864,10 +831,8 @@ def main():
             opt_captions = st.text_area("Observations", placeholder="Describe grain structure...", key="opt_captions")
             st.divider()
             method_ref, operator, op_notes = add_operator_fields(st.container(), key_prefix="Optical")
-            # Use "Optical" key to match technique list
             report_data["Optical"] = {"meta": f"Etchant: {etchant} | Illumination: Brightfield", "images": opt_files, "captions": opt_captions, "method_ref": method_ref, "operator": operator, "op_notes": op_notes}
 
-    # PSD
     if technique_flags.get("PSD"):
         with st.expander("📊 Particle Size Distribution", expanded=True):
             d10 = st.number_input("D10 (µm)", 0.0)
@@ -878,7 +843,6 @@ def main():
             method_ref, operator, op_notes = add_operator_fields(st.container(), key_prefix="PSD")
             report_data["PSD"] = {"meta": "Method: Laser Diffraction", "table": pd.DataFrame([{"Param": "D10", "Value (µm)": d10}, {"Param": "D50", "Value (µm)": d50}, {"Param": "D90", "Value (µm)": d90}]), "dispersant": dispersant, "method_ref": method_ref, "operator": operator, "op_notes": op_notes}
 
-    # XRD
     if technique_flags.get("XRD"):
         with st.expander("XRD", expanded=True):
             xrd_files = st.file_uploader("Upload XRD result", type=["jpg", "png"], accept_multiple_files=True, key="xrd_files")
@@ -887,7 +851,6 @@ def main():
             method_ref, operator, op_notes = add_operator_fields(st.container(), key_prefix="XRD")
             report_data["XRD"] = {"images": xrd_files, "captions": xrd_captions, "method_ref": method_ref, "operator": operator, "op_notes": op_notes}
 
-    # TGA
     if technique_flags.get("TGA"):
         with st.expander("TGA", expanded=True):
             tga_files = st.file_uploader("Upload TGA result", type=["jpg", "png"], accept_multiple_files=True, key="tga_files")
@@ -896,7 +859,6 @@ def main():
             method_ref, operator, op_notes = add_operator_fields(st.container(), key_prefix="TGA")
             report_data["TGA"] = {"images": tga_files, "captions": tga_captions, "method_ref": method_ref, "operator": operator, "op_notes": op_notes}
 
-    # BET
     if technique_flags.get("BET"):
         with st.expander("BET", expanded=True):
             surface_area = st.number_input("Surface area (m²/g)")
@@ -906,10 +868,8 @@ def main():
             method_ref, operator, op_notes = add_operator_fields(st.container(), key_prefix="BET")
             report_data["BET"] = {"surface area": surface_area, "images": bet_files, "captions": bet_captions, "method_ref": method_ref, "operator": operator, "op_notes": op_notes}
 
-    # Porosity
     if technique_flags.get("Porosity"):
         with st.expander("🫧 Porosity", expanded=True):
-            st.caption("Upload images and/or paste a table range from Excel.")
             por_setup = st.text_input("Method / setup (optional)", "", key="por_setup")
             por_files = st.file_uploader("Upload Porosity Images (multi)", type=["jpg", "jpeg", "png", "tif", "tiff"], accept_multiple_files=True, key="por_files")
             por_captions = st.text_area("Captions (one per line, optional)", key="por_captions")
@@ -918,7 +878,6 @@ def main():
             method_ref, operator, op_notes = add_operator_fields(st.container(), key_prefix="Porosity")
             report_data["Porosity"] = {"meta": por_setup.strip(), "table": df_por, "images": por_files, "captions": por_captions, "method_ref": method_ref, "operator": operator, "op_notes": op_notes}
 
-    # Al Grain Size
     if technique_flags.get("Al Grain Size"):
         with st.expander("🌾 Al Grain Size (GSA)", expanded=True):
             gsa_standard = st.text_input("Standard / procedure", "ASTM E112", key="gsa_standard")
@@ -936,10 +895,8 @@ def main():
                 meta_parts.append(f"Mag/Scale: {gsa_mag.strip()}")
             report_data["Al Grain Size"] = {"meta": " | ".join(meta_parts), "table": df_gsa, "images": gsa_files, "captions": gsa_captions, "method_ref": method_ref, "operator": operator, "op_notes": op_notes}
 
-    # Comparison Matrix
     if technique_flags.get("Comparison Matrix"):
         with st.expander("📋 Comparison Matrix", expanded=True):
-            st.caption("Add one or more comparison tables. Each table can be linked to an analysis technique.")
             if "cmp_tables_n" not in st.session_state:
                 st.session_state.cmp_tables_n = 1
             cbtn1, cbtn2, _ = st.columns([1, 1, 4])
@@ -964,12 +921,11 @@ def main():
             method_ref, operator, op_notes = add_operator_fields(st.container(), key_prefix="Comparison_Matrix")
             report_data["Comparison Matrix"] = {"meta": "", "tables": cmp_tables, "method_ref": method_ref, "operator": operator, "op_notes": op_notes}
 
-    # Chemical analysis group
+    # Chemical methods group
     CHEM_METHODS = ["C, S, N Analysis", "F Analysis", "Metallic Al Analysis", "Metallic Si Analysis"]
     chem_selected = [m for m in CHEM_METHODS if technique_flags.get(m)]
     if chem_selected:
         with st.expander("🧪 Chemical analysis", expanded=True):
-            st.caption("Add operator name + notes per method.")
             tabs = st.tabs(chem_selected)
             for tab, method in zip(tabs, chem_selected):
                 with tab:
@@ -1005,15 +961,14 @@ def main():
         reviewed_title = st.text_input("Reviewed by (title)", "Reviewer")
 
     st.divider()
-    # Revision number
     rev_number = st.number_input("Revision number", min_value=0, value=0, step=1)
 
-    # Generate PDF button
+    # Generate PDF
     if st.button("🚀 Generate PDF Report", type="primary"):
-        # Validate mandatory fields
+        # Validate mandatory fields: sample_id (Project ID), reported_by, reviewed_by
         missing = []
-        if not project_id.strip():
-            missing.append("Project ID")
+        if not sample_id.strip():
+            missing.append("TSR No (Project ID)")
         if not reported_by.strip():
             missing.append("Reported by (name)")
         if not reviewed_by.strip():
@@ -1021,29 +976,26 @@ def main():
         if missing:
             st.error(f"Please complete mandatory fields: {', '.join(missing)}")
         else:
-            # Build meta and create PDF
             theme = Theme()
-            meta = {"lab_name": lab_name, "lab_addr": lab_addr, "lab_no": lab_no, "lab_mail": lab_mail, "project_title": project_title, "requester": requester, "report_date": str(datetime.date.today()), "logo_path": save_upload(logo), "project_id": project_id, "revision": int(rev_number)}
+            meta = {"lab_name": lab_name, "lab_addr": lab_addr, "lab_no": lab_no, "lab_mail": lab_mail, "project_title": project_title, "requester": requester, "report_date": str(datetime.date.today()), "logo_path": save_upload(logo), "project_id": sample_id, "revision": int(rev_number)}
             pdf = AnalyticalReportPDF(theme, meta)
             pdf.add_page()
 
-            # Determine techniques to list (exclude "Comparison Matrix" but include any techniques referenced inside comparison tables)
+            # Determine techniques to list (exclude Comparison Matrix itself)
             technique_order = ["ICP-OES", "XRF", "C, S, N Analysis", "F Analysis", "Metallic Al Analysis", "Metallic Si Analysis", "SEM-EDX", "Optical", "Porosity", "PSD", "BET", "XRD", "TGA", "Al Grain Size"]
             included_set = set(k for k, v in technique_flags.items() if v and k != "Comparison Matrix")
-            # Add techniques referenced in comparison tables
+            # also include any technique named inside comparison matrix tables
             cmp_block = report_data.get("Comparison Matrix", {})
             for t in (cmp_block.get("tables") or []):
                 tname = (t.get("technique") or "").strip()
-                if tname and tname != "Comparison Matrix":
+                if tname:
                     included_set.add(tname)
-            # Preserve order
             techniques_included = [t for t in technique_order if t in included_set]
 
             # Info block
             pdf.section_header_keep(f"1. Project: {context}", first_block_mm=70.0)
             metadata_items = [
-                ("Project/Report ID", project_id),
-                ("TSR No", sample_id),
+                ("Project/Report ID", sample_id),
                 ("Requester", requester),
                 ("Sample received", str(rx_date)),
                 ("Project title", project_title),
@@ -1052,7 +1004,6 @@ def main():
                 ("Environment", f"{temp}°C / {hum}% RH"),
             ]
             pdf.add_kv_box(metadata_items, title="Report and Sample Information", cols=2)
-
             pdf.set_font(theme.font_main, "", 10)
             pdf.set_text_color(*theme.text_dark)
             pdf.ln(2)
@@ -1070,7 +1021,7 @@ def main():
                 pdf.multi_cell(0, 6, pdf_safe_text(sample_condition.strip()))
                 pdf.ln(1)
 
-            # Techniques included (do not show Comparison Matrix)
+            # Techniques included (do not list "Comparison Matrix")
             pdf.subtitle("1.1 Techniques included")
             tech_rows = []
             for tech in techniques_included:
@@ -1084,10 +1035,8 @@ def main():
             pdf.section_header_keep("2. Analysis results", first_block_mm=35.0)
             result_index = 1
 
-            # Print non-chemical results in technique order
             for tech in techniques_included:
                 data = report_data.get(tech) or {}
-                # Reserve space depending on content
                 first_block = 18.0
                 if isinstance(data.get("table"), pd.DataFrame) and not data["table"].empty:
                     first_block = 28.0
@@ -1126,7 +1075,7 @@ def main():
                         for p in tmp_paths:
                             cleanup_file(p)
 
-            # Comparison Matrix tables (printed separately, each as its own titled subsection)
+            # Comparison Matrix tables printed separately
             cmp_data = report_data.get("Comparison Matrix") or {}
             cmp_tables = cmp_data.get("tables") or []
             for block in cmp_tables:
@@ -1147,7 +1096,7 @@ def main():
                 pdf.add_zebra_table(df_cmp)
                 pdf.ln(1)
 
-            # Chemical analysis grouped
+            # Chemical group
             chem_items = [(k, v) for k, v in report_data.items() if v.get("group") == "Chemical analysis"]
             if chem_items:
                 ensure_space(pdf, 18.0)
@@ -1170,14 +1119,14 @@ def main():
                     if df is not None:
                         pdf.add_zebra_table(df)
 
-            # Conclusions (use generic note if empty)
+            # Conclusions
             pdf.section_header_keep("3. Conclusions / summary", first_block_mm=30.0)
             pdf.set_font(theme.font_main, "", 10)
             pdf.set_text_color(*theme.text_dark)
             conclusion_text = summary.strip() or conclusion_placeholder
             pdf.multi_cell(0, 6, pdf_safe_text(conclusion_text))
 
-            # Sign-off (include revision in metadata previously)
+            # Sign-off
             pdf.section_header_keep("4. Sign-off", first_block_mm=25.0)
             pdf.add_signoff_two_columns(left_label="Reported by", left_name=reported_by, left_title=reported_title, right_label="Reviewed by", right_name=reviewed_by, right_title=reviewed_title)
 
@@ -1186,8 +1135,8 @@ def main():
                 out = pdf.output(dest="S")
                 pdf_bytes = out.encode("latin-1", "ignore") if isinstance(out, str) else bytes(out)
                 cleanup_file(meta["logo_path"])
-                st.success("✅ Report Generated!")
-                st.download_button(label="📥 Download PDF", data=pdf_bytes, file_name=f"{project_id or sample_id}.pdf", mime="application/pdf")
+                st.success("✅ Report Generated! Download below.")
+                st.download_button(label="📥 Download PDF", data=pdf_bytes, file_name=f"{sample_id}.pdf", mime="application/pdf")
             except Exception as e:
                 st.error(f"Error generating PDF: {e}")
 
