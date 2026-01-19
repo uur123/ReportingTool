@@ -7,13 +7,14 @@ from dataclasses import dataclass
 from typing import Dict, Any, List, Optional, Tuple
 import re
 
-# Required packages:
+# ---------------------------------------------------------
+# ENGINEERING NOTE: Ensure you have these installed:
 # pip install streamlit pandas fpdf2 Pillow
+# ---------------------------------------------------------
 import pandas as pd
 import streamlit as st
 from PIL import Image
 from fpdf import FPDF
-
 
 # -----------------------------------------------------------------------------
 ALL_MEASUREMENT_TECHNIQUES = [
@@ -35,7 +36,7 @@ ALL_MEASUREMENT_TECHNIQUES = [
 
 
 # ==============================================================================
-# THEME / PDF ENGINE
+# 1. THEME / PDF ENGINE
 # ==============================================================================
 @dataclass
 class Theme:
@@ -93,6 +94,7 @@ class AnalyticalReportPDF(FPDF):
         self.set_line_width(0.5)
         self.line(self.l_margin, y_line, self.w - self.r_margin, y_line)
 
+        # reserve header height
         self.set_y(y_line + 6.0)
 
     def subtitle(self, title: str):
@@ -177,6 +179,7 @@ class AnalyticalReportPDF(FPDF):
         t = self.theme
         if not items:
             return
+
         box_w = self.w - self.l_margin - self.r_margin
         x0 = self.l_margin
         y0 = self.get_y()
@@ -237,10 +240,12 @@ class AnalyticalReportPDF(FPDF):
         t = self.theme
         if not rows:
             return
+
         df = pd.DataFrame(rows, columns=["Technique", "Method/SOP", "Output"])
         est_h = 7 + min(len(df), 10) * 7 + 10
         if self.get_y() + est_h > self.h - self.b_margin:
             self.add_page()
+
         if title:
             self.set_font(t.font_main, "B", 10)
             self.set_text_color(*t.text_dark)
@@ -307,6 +312,7 @@ class AnalyticalReportPDF(FPDF):
                 aspect = h_px / w_px
         except Exception:
             return
+
         max_w = self.w - self.l_margin - self.r_margin
         display_w = min(120, max_w)
         display_h = display_w * aspect
@@ -331,7 +337,7 @@ class AnalyticalReportPDF(FPDF):
 
 
 # ==============================================================================
-# UTILITIES (module-level)
+# UTILITIES
 # ==============================================================================
 def ensure_space(pdf: FPDF, needed_mm: float):
     if pdf.get_y() + needed_mm > pdf.h - pdf.b_margin:
@@ -452,7 +458,7 @@ def technique_output_hint(name: str) -> str:
     return m.get(name, "-")
 
 
-# pdf_operator_block moved to module-level to avoid NameError at PDF time
+# pdf_operator_block moved to module-level so it's available during PDF generation
 def pdf_operator_block(pdf: AnalyticalReportPDF, theme: Theme, operator: str, notes: str, title: str = "Analysis Notes"):
     operator = (operator or "").strip()
     notes = (notes or "").strip()
@@ -472,10 +478,9 @@ def pdf_operator_block(pdf: AnalyticalReportPDF, theme: Theme, operator: str, no
         pdf.multi_cell(w, 5, pdf_safe_text(f"Operator: {operator}"))
     if notes:
         safe_notes = pdf_safe_text(notes)
-        # insert break opportunities for very long words
         def break_word(m):
             wv = m.group(0)
-            return " ".join(wv[i : i + 70] for i in range(0, len(wv), 70))
+            return " ".join(wv[i: i + 70] for i in range(0, len(wv), 70))
         safe_notes = re.sub(r"\S{71,}", break_word, safe_notes)
         pdf.set_x(pdf.l_margin)
         pdf.multi_cell(w, 5, pdf_safe_text(f"Notes: {safe_notes}"))
@@ -518,11 +523,17 @@ def compute_default_hours(technique_flags: Dict[str, bool], context: str) -> flo
     return round(base, 2)
 
 
-def technique_status_from_data(data: Dict[str, Any]) -> str:
+def technique_status_from_data(data: Dict[str, Any]) -> bool:
+    """
+    Return True if the technique block contains any user-supplied content.
+    """
+    if not isinstance(data, dict):
+        return False
     has_table = isinstance(data.get("table"), pd.DataFrame) and not data["table"].empty
     has_images = bool(data.get("images"))
-    has_any = has_table or has_images or bool((data.get("meta") or "").strip())
-    return "Performed" if has_any else "Selected - no data"
+    has_meta = bool((data.get("meta") or "").strip())
+    has_operator = bool((data.get("operator") or "").strip() or (data.get("op_notes") or "").strip())
+    return bool(has_table or has_images or has_meta or has_operator)
 
 
 def default_comparison_df() -> pd.DataFrame:
@@ -583,106 +594,6 @@ def parse_excel_paste(text: str) -> Optional[pd.DataFrame]:
     return df
 
 
-def comparison_matrix_editor(*, default_df: pd.DataFrame, editor_key: str, label: str) -> pd.DataFrame:
-    store_key = f"{editor_key}__df"
-    df_current = st.session_state.get(store_key)
-    if not isinstance(df_current, pd.DataFrame) or df_current.empty:
-        df_current = default_df.copy()
-    c1, c2, c3 = st.columns([1.2, 1.2, 3.6])
-    if c1.button("➕ Add column", key=f"{editor_key}__add_col"):
-        base = "New column"
-        idx = 1
-        new_col = f"{base} {idx}"
-        existing = set(map(str, df_current.columns))
-        while new_col in existing:
-            idx += 1
-            new_col = f"{base} {idx}"
-        df_current = df_current.copy()
-        df_current[new_col] = ""
-    with c2:
-        with st.popover("➖ Remove column", use_container_width=True):
-            st.caption("Select one or more columns to remove (at least 1 column must remain).")
-            cols_now = list(map(str, df_current.columns))
-            to_remove = st.multiselect("Columns to remove", options=cols_now, key=f"{editor_key}__rm_cols")
-            if st.button("Remove selected", key=f"{editor_key}__rm_cols_btn"):
-                if not to_remove:
-                    st.info("No columns selected.")
-                else:
-                    remaining = [c for c in cols_now if c not in set(to_remove)]
-                    if len(remaining) < 1:
-                        st.warning("Cannot remove all columns. Keep at least one column.")
-                    else:
-                        df_current = df_current.copy()
-                        df_current = df_current[remaining]
-    imported = None
-    try:
-        pop = st.popover("📋 Import from Excel", use_container_width=False)
-        with pop:
-            txt = st.text_area("Paste copied Excel range here", key=f"{editor_key}__import_txt", height=120)
-            if st.button("Import", key=f"{editor_key}__import_btn"):
-                imported = parse_excel_paste(txt)
-    except Exception:
-        with c3:
-            with st.expander("📋 Import from Excel", expanded=False):
-                txt = st.text_area("Paste copied Excel range here", key=f"{editor_key}__import_txt", height=120)
-                if st.button("Import", key=f"{editor_key}__import_btn"):
-                    imported = parse_excel_paste(txt)
-    if imported is not None:
-        if isinstance(imported, pd.DataFrame) and not imported.empty:
-            df_current = imported
-        else:
-            st.warning("Import failed. Copy a rectangular range (including headers) and try again.")
-    st.markdown("**Rename columns**")
-    cols_now = list(df_current.columns)
-    wrap = min(max(len(cols_now), 1), 6)
-    rename_cols = st.columns(wrap)
-    new_names = []
-    for i, col in enumerate(cols_now):
-        col_container = rename_cols[i % wrap]
-        new_name = col_container.text_input(label=f"col_{i}", value=str(col), key=f"{editor_key}__colname_{i}", label_visibility="collapsed")
-        new_names.append(new_name.strip() or str(col))
-    if new_names != list(map(str, df_current.columns)):
-        seen = {}
-        fixed = []
-        for name in new_names:
-            if name not in seen:
-                seen[name] = 1
-                fixed.append(name)
-            else:
-                seen[name] += 1
-                fixed.append(f"{name} ({seen[name]})")
-        df_current = df_current.copy()
-        df_current.columns = fixed
-    df_out = st.data_editor(df_current, num_rows="dynamic", use_container_width=True, key=editor_key)
-    st.session_state[store_key] = df_out
-    return df_out
-
-
-def editor_with_excel_paste(*, default_df: pd.DataFrame, editor_key: str, paste_key: str, label: str = "Paste from Excel (optional)", apply_button_text: str = "Apply paste to table", help_text: str = "Copy a cell range in Excel/Sheets and paste here. Tabs/newlines are supported.", height: int = 140, use_expander: bool = True) -> pd.DataFrame:
-    store_key = f"{editor_key}__df"
-    def paste_ui():
-        st.markdown(f"**{label}**")
-        st.caption(help_text)
-        txt = st.text_area("Paste area", key=paste_key, height=height)
-        if st.button(apply_button_text, key=f"{editor_key}__apply"):
-            df_new = parse_excel_paste(txt)
-            if df_new is None:
-                st.warning("Could not parse pasted data. Copy a rectangular range (rows/columns) and paste again.")
-            else:
-                st.session_state[store_key] = df_new
-    if use_expander:
-        with st.expander(label, expanded=False):
-            paste_ui()
-    else:
-        paste_ui()
-    df_current = st.session_state.get(store_key)
-    if not isinstance(df_current, pd.DataFrame) or df_current.empty:
-        df_current = default_df
-    df_out = st.data_editor(df_current, num_rows="dynamic", use_container_width=True, key=editor_key)
-    st.session_state[store_key] = df_out
-    return df_out
-
-
 # ==============================================================================
 # STREAMLIT UI
 # ==============================================================================
@@ -690,6 +601,7 @@ def main():
     st.set_page_config(page_title="EN-Report", layout="wide", page_icon="🔬", initial_sidebar_state="collapsed")
     if "report_data" not in st.session_state:
         st.session_state.report_data = {}
+
     st.markdown("<style>.stApp { background-color: #f8f9fa; }</style>", unsafe_allow_html=True)
 
     # Sidebar
@@ -711,7 +623,6 @@ def main():
     with st.container():
         c1, c2, c3, c4 = st.columns(4)
         project_title = c1.text_input("Project Title", "Benchmarking of HD1")
-        # Project ID is the TSR No (sample_id) per your request — do not add a separate Project ID field
         requester = c2.text_input("Requester Name", "John Doe")
         context = c3.selectbox("Context", ["R&D project", "Operational Support", "Casting Defect Analysis"])
         sample_id = c4.text_input("TSR No (Project ID)", "", help="Mandatory: this is used as Project ID")
@@ -760,7 +671,7 @@ def main():
         technique_flags["F Analysis"] = st.checkbox("F Analysis")
         technique_flags["Comparison Matrix"] = st.checkbox("Comparison Matrix")
 
-    # Effort & cost (unchanged)
+    # Effort & cost
     st.subheader("3. Effort & Cost (optional)")
     default_hours = compute_default_hours(technique_flags, context)
     if "est_hours" not in st.session_state:
@@ -791,7 +702,7 @@ def main():
     report_data.clear()
 
     # -------------------------
-    # Data entry for each technique (behaviour preserved from previous version)
+    # Data entry for each technique (preserve behavior)
     # -------------------------
     if technique_flags.get("ICP-OES"):
         with st.expander("🧪 ICP-OES Data", expanded=True):
@@ -895,8 +806,10 @@ def main():
                 meta_parts.append(f"Mag/Scale: {gsa_mag.strip()}")
             report_data["Al Grain Size"] = {"meta": " | ".join(meta_parts), "table": df_gsa, "images": gsa_files, "captions": gsa_captions, "method_ref": method_ref, "operator": operator, "op_notes": op_notes}
 
+    # Comparison Matrix (UI) — add Method/SOP per comparison table
     if technique_flags.get("Comparison Matrix"):
         with st.expander("📋 Comparison Matrix", expanded=True):
+            st.caption("Add one or more comparison tables. Each table can be linked to an analysis technique. You can also specify Method/SOP for each comparison table.")
             if "cmp_tables_n" not in st.session_state:
                 st.session_state.cmp_tables_n = 1
             cbtn1, cbtn2, _ = st.columns([1, 1, 4])
@@ -904,6 +817,7 @@ def main():
                 st.session_state.cmp_tables_n += 1
             if cbtn2.button("➖ Remove last table", key="cmp_remove_table") and st.session_state.cmp_tables_n > 1:
                 st.session_state.cmp_tables_n -= 1
+
             cmp_tables = []
             for i in range(st.session_state.cmp_tables_n):
                 st.markdown(f"#### Comparison Table {i+1}")
@@ -912,11 +826,14 @@ def main():
                 tech_other = ""
                 if tech_choice == "Other":
                     tech_other = cA.text_input("Technique name", value="", key=f"cmp_tech_other_{i}")
+                # Method/SOP per comparison table
+                method_sop_table = cA.text_input("Method / SOP (optional)", value="", key=f"cmp_method_{i}", placeholder="e.g. WI-CMP-001")
                 table_title = cB.text_input("Table title (optional)", value="", key=f"cmp_title_{i}")
                 df_cmp = comparison_matrix_editor(default_df=default_comparison_df(), editor_key=f"cmp_df_{i}", label=f"Comparison table {i+1}")
                 chosen = tech_other.strip() if tech_choice == "Other" else tech_choice
-                cmp_tables.append({"technique": chosen, "title": table_title.strip(), "table": df_cmp})
+                cmp_tables.append({"technique": chosen, "title": table_title.strip(), "table": df_cmp, "method_ref": method_sop_table.strip()})
                 st.divider()
+
             st.markdown("##### Operator traceability (Comparison Matrix)")
             method_ref, operator, op_notes = add_operator_fields(st.container(), key_prefix="Comparison_Matrix")
             report_data["Comparison Matrix"] = {"meta": "", "tables": cmp_tables, "method_ref": method_ref, "operator": operator, "op_notes": op_notes}
@@ -965,7 +882,6 @@ def main():
 
     # Generate PDF
     if st.button("🚀 Generate PDF Report", type="primary"):
-        # Validate mandatory fields: sample_id (Project ID), reported_by, reviewed_by
         missing = []
         if not sample_id.strip():
             missing.append("TSR No (Project ID)")
@@ -981,15 +897,26 @@ def main():
             pdf = AnalyticalReportPDF(theme, meta)
             pdf.add_page()
 
-            # Determine techniques to list (exclude Comparison Matrix itself)
+            # Determine techniques to list (exclude "Comparison Matrix" itself)
             technique_order = ["ICP-OES", "XRF", "C, S, N Analysis", "F Analysis", "Metallic Al Analysis", "Metallic Si Analysis", "SEM-EDX", "Optical", "Porosity", "PSD", "BET", "XRD", "TGA", "Al Grain Size"]
             included_set = set(k for k, v in technique_flags.items() if v and k != "Comparison Matrix")
-            # also include any technique named inside comparison matrix tables
+
+            # Add techniques referenced in comparison tables
             cmp_block = report_data.get("Comparison Matrix", {})
-            for t in (cmp_block.get("tables") or []):
+            cmp_tables = cmp_block.get("tables") or []
+            cmp_tech_names = set()
+            cmp_method_map: Dict[str, str] = {}
+            for t in cmp_tables:
                 tname = (t.get("technique") or "").strip()
                 if tname:
-                    included_set.add(tname)
+                    cmp_tech_names.add(tname)
+                    # prefer per-table method_ref if supplied
+                    if t.get("method_ref"):
+                        # if multiple tables reference same technique, keep the first non-empty
+                        cmp_method_map.setdefault(tname, t.get("method_ref") or "")
+            for tname in cmp_tech_names:
+                included_set.add(tname)
+
             techniques_included = [t for t in technique_order if t in included_set]
 
             # Info block
@@ -1026,7 +953,8 @@ def main():
             tech_rows = []
             for tech in techniques_included:
                 d = report_data.get(tech, {}) or {}
-                method_sop = (d.get("method_ref") or "").strip()
+                # method ref: prefer technique block's method_ref, else comparison table's method_ref
+                method_sop = (d.get("method_ref") or "").strip() or cmp_method_map.get(tech, "")
                 tech_rows.append({"Technique": tech, "Method/SOP": method_sop, "Output": technique_output_hint(tech)})
             pdf.add_techniques_table(tech_rows, title="")
 
@@ -1035,8 +963,16 @@ def main():
             pdf.section_header_keep("2. Analysis results", first_block_mm=35.0)
             result_index = 1
 
+            # Print technique sections but avoid duplicate title when technique appears only as a comparison-table reference.
             for tech in techniques_included:
                 data = report_data.get(tech) or {}
+                has_own_data = technique_status_from_data(data)
+                # If the technique appears in comparison tables but has no own data, skip printing a blank section here;
+                # the comparison table will be printed below (with the same title).
+                if (tech in cmp_tech_names) and not has_own_data:
+                    continue
+
+                # reserve space depending on content
                 first_block = 18.0
                 if isinstance(data.get("table"), pd.DataFrame) and not data["table"].empty:
                     first_block = 28.0
@@ -1044,6 +980,7 @@ def main():
                     first_block = 55.0
                 elif data.get("meta"):
                     first_block = 22.0
+
                 ensure_space(pdf, 10.0 + first_block)
                 pdf.subtitle(f"2.{result_index} {tech}")
                 result_index += 1
@@ -1075,7 +1012,7 @@ def main():
                         for p in tmp_paths:
                             cleanup_file(p)
 
-            # Comparison Matrix tables printed separately
+            # Comparison Matrix tables printed separately (each with its own Method/SOP)
             cmp_data = report_data.get("Comparison Matrix") or {}
             cmp_tables = cmp_data.get("tables") or []
             for block in cmp_tables:
@@ -1084,14 +1021,24 @@ def main():
                     continue
                 tech_used = (block.get("technique") or "").strip() or "Comparison"
                 table_title = (block.get("title") or "").strip()
+                method_ref_table = (block.get("method_ref") or "").strip()
+
                 ensure_space(pdf, 10.0 + max(22.0, estimate_table_height_mm(df_cmp)))
                 pdf.subtitle(f"2.{result_index} {tech_used}")
                 result_index += 1
+
+                if method_ref_table:
+                    pdf.set_font(theme.font_mono, "", 8)
+                    pdf.set_text_color(*theme.text_gray)
+                    pdf.cell(0, 5, pdf_safe_text(f"Method/SOP: {method_ref_table}"), 0, 1, "L")
+                    pdf.set_text_color(*theme.text_dark)
+
                 if table_title:
                     pdf.set_font(theme.font_main, "I", 9)
                     pdf.set_text_color(*theme.text_gray)
                     pdf.cell(0, 5, pdf_safe_text(table_title), 0, 1, "L")
                     pdf.set_text_color(*theme.text_dark)
+
                 pdf_operator_block(pdf, theme, cmp_data.get("operator", ""), cmp_data.get("op_notes", ""), title="Comparison Matrix traceability")
                 pdf.add_zebra_table(df_cmp)
                 pdf.ln(1)
