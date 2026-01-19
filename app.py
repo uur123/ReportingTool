@@ -16,6 +16,26 @@ from PIL import Image
 from fpdf import FPDF
 
 
+# 0) GLOBAL 
+# -----------------------------------------------------------------------------
+ALL_MEASUREMENT_TECHNIQUES = [
+    "ICP-OES",
+    "XRF",
+    "C, S, N Analysis",
+    "F Analysis",
+    "Metallic Al Analysis",
+    "Metallic Si Analysis",
+    "SEM-EDX",
+    "Optical",
+    "Porosity",
+    "PSD",
+    "BET",
+    "XRD",
+    "TGA",
+    "Al Grain Size",
+]
+
+
 # ==============================================================================
 # 1. DESIGN SYSTEM (The "Face")
 # ==============================================================================
@@ -689,7 +709,123 @@ def parse_excel_paste(text: str) -> Optional[pd.DataFrame]:
 
     return df
 
+def comparison_matrix_editor(
+    *,
+    default_df: pd.DataFrame,
+    editor_key: str,
+    label: str,
+) -> pd.DataFrame:
+    """
+    Comparison Matrix editor:
+    - Add column
+    - Remove column section (single or multiple)
+    - Rename columns
+    - Optional import from Excel
+    """
+    store_key = f"{editor_key}__df"
+    df_current = st.session_state.get(store_key)
 
+    if not isinstance(df_current, pd.DataFrame) or df_current.empty:
+        df_current = default_df.copy()
+
+    # ---- Controls row ----
+    c1, c2, c3 = st.columns([1.2, 1.2, 3.6])
+
+    # Add new column
+    if c1.button("➕ Add column", key=f"{editor_key}__add_col"):
+        base = "New column"
+        idx = 1
+        new_col = f"{base} {idx}"
+        existing = set(map(str, df_current.columns))
+        while new_col in existing:
+            idx += 1
+            new_col = f"{base} {idx}"
+        df_current = df_current.copy()
+        df_current[new_col] = ""
+
+    # Remove column section
+    with c2:
+        with st.popover("➖ Remove column", use_container_width=True):
+            st.caption("Select one or more columns to remove (at least 1 column must remain).")
+            cols_now = list(map(str, df_current.columns))
+            to_remove = st.multiselect(
+                "Columns to remove",
+                options=cols_now,
+                key=f"{editor_key}__rm_cols",
+            )
+            if st.button("Remove selected", key=f"{editor_key}__rm_cols_btn"):
+                if not to_remove:
+                    st.info("No columns selected.")
+                else:
+                    remaining = [c for c in cols_now if c not in set(to_remove)]
+                    if len(remaining) < 1:
+                        st.warning("Cannot remove all columns. Keep at least one column.")
+                    else:
+                        df_current = df_current.copy()
+                        df_current = df_current[remaining]
+
+    # Optional import (compact UI)
+    imported = None
+    try:
+        pop = st.popover("📋 Import from Excel", use_container_width=False)
+        with pop:
+            txt = st.text_area("Paste copied Excel range here", key=f"{editor_key}__import_txt", height=120)
+            if st.button("Import", key=f"{editor_key}__import_btn"):
+                imported = parse_excel_paste(txt)
+    except Exception:
+        with c3:
+            with st.expander("📋 Import from Excel", expanded=False):
+                txt = st.text_area("Paste copied Excel range here", key=f"{editor_key}__import_txt", height=120)
+                if st.button("Import", key=f"{editor_key}__import_btn"):
+                    imported = parse_excel_paste(txt)
+
+    if imported is not None:
+        if isinstance(imported, pd.DataFrame) and not imported.empty:
+            df_current = imported
+        else:
+            st.warning("Import failed. Copy a rectangular range (including headers) and try again.")
+
+    # ---- Rename columns UI ----
+    st.markdown("**Rename columns**")
+    cols_now = list(df_current.columns)
+    wrap = min(max(len(cols_now), 1), 6)
+    rename_cols = st.columns(wrap)
+
+    new_names = []
+    for i, col in enumerate(cols_now):
+        col_container = rename_cols[i % wrap]
+        new_name = col_container.text_input(
+            label=f"col_{i}",
+            value=str(col),
+            key=f"{editor_key}__colname_{i}",
+            label_visibility="collapsed",
+        )
+        new_names.append(new_name.strip() or str(col))
+
+    if new_names != list(map(str, df_current.columns)):
+        # Ensure uniqueness to prevent broken DataFrame behavior
+        seen = {}
+        fixed = []
+        for name in new_names:
+            if name not in seen:
+                seen[name] = 1
+                fixed.append(name)
+            else:
+                seen[name] += 1
+                fixed.append(f"{name} ({seen[name]})")
+        df_current = df_current.copy()
+        df_current.columns = fixed
+
+    # ---- Table editor ----
+    df_out = st.data_editor(
+        df_current,
+        num_rows="dynamic",
+        use_container_width=True,
+        key=editor_key,
+    )
+    st.session_state[store_key] = df_out
+    return df_out
+    """
 def comparison_matrix_editor(
     *,
     default_df: pd.DataFrame,
@@ -772,7 +908,7 @@ def comparison_matrix_editor(
     st.session_state[store_key] = df_out
     return df_out
 
-
+"""
 
 
 def editor_with_excel_paste(
@@ -1311,7 +1447,73 @@ def main():
                 "op_notes": op_notes,
             }
     # --- MODULE: Comparison Matrix (MULTI TABLES + Excel paste) ---
-    # --- MODULE: Comparison Matrix (MULTI TABLES, per-technique, no big paste area) ---
+    if technique_flags["Comparison Matrix"]:
+    with st.expander("📋 Comparison Matrix", expanded=True):
+        st.caption("Add one or more comparison tables. Each table is linked to one Analysis technique.")
+
+        if "cmp_tables_n" not in st.session_state:
+            st.session_state.cmp_tables_n = 1
+
+        cbtn1, cbtn2, _ = st.columns([1, 1, 4])
+        if cbtn1.button("➕ Add table", key="cmp_add_table"):
+            st.session_state.cmp_tables_n += 1
+        if cbtn2.button("➖ Remove last table", key="cmp_remove_table") and st.session_state.cmp_tables_n > 1:
+            st.session_state.cmp_tables_n -= 1
+
+        cmp_tables = []
+
+        for i in range(st.session_state.cmp_tables_n):
+            st.markdown(f"#### Comparison Table {i+1}")
+
+            cA, cB = st.columns([1.2, 2.8])
+
+            # IMPORTANT: Analysis technique lists ALL measurement techniques
+            tech_choice = cA.selectbox(
+                "Analysis technique",
+                options=ALL_MEASUREMENT_TECHNIQUES + ["Other"],
+                key=f"cmp_tech_{i}",
+            )
+
+            tech_other = ""
+            if tech_choice == "Other":
+                tech_other = cA.text_input("Technique name", value="", key=f"cmp_tech_other_{i}")
+
+            table_title = cB.text_input(
+                "Table title (optional)",
+                value="",
+                key=f"cmp_title_{i}"
+            )
+
+            df_cmp = comparison_matrix_editor(
+                default_df=default_comparison_df(),
+                editor_key=f"cmp_df_{i}",
+                label=f"Comparison table {i+1}",
+            )
+
+            chosen = tech_other.strip() if tech_choice == "Other" else tech_choice
+
+            cmp_tables.append({
+                "technique": chosen,
+                "title": table_title.strip(),
+                "table": df_cmp
+            })
+
+            st.divider()
+
+        st.markdown("##### Operator traceability (Comparison Matrix)")
+        method_ref, operator, op_notes = add_operator_fields(
+            st.container(), key_prefix="Comparison_Matrix", method_name=""
+        )
+
+        report_data["Comparison Matrix"] = {
+            "meta": "",
+            "tables": cmp_tables,
+            "method_ref": method_ref,
+            "operator": operator,
+            "op_notes": op_notes,
+        }
+
+"""
     if technique_flags["Comparison Matrix"]:
         with st.expander("📋 Comparison Matrix", expanded=True):
             st.caption("Add one or more comparison tables. Each table can be linked to a selected analysis technique.")
@@ -1380,7 +1582,7 @@ def main():
                 "op_notes": op_notes,
             }
 
-    
+ """   
         
     # --- MODULE: Chemical analysis (grouped, multiple sub-methods) ---
     chem_selected = [m for m in CHEM_METHODS if technique_flags.get(m)]
@@ -1615,30 +1817,29 @@ def main():
             # table(s)
             if tech == "Comparison Matrix":
                 tables = data.get("tables") or []
-                for j, block in enumerate(tables, start=1):
-                    df_cmp = block.get("table") if isinstance(block.get("table"), pd.DataFrame) else None
+                # Print each comparison table as its own subsection, titled by the selected technique
+                for block in tables:
+                   df_cmp = block.get("table") if isinstance(block.get("table"), pd.DataFrame) else None
                     if df_cmp is None or df_cmp.empty:
                         continue
 
-                    #method_used = (block.get("method_used") or "").strip()
-                    #table_title = (block.get("title") or "").strip()
-
-                    #ensure_space(pdf, 14.0 + estimate_table_height_mm(df_cmp))
-
-                    #pdf.set_font(theme.font_main, "B", 10)
-                    #pdf.set_text_color(*theme.text_dark)
-                    #pdf.cell(0, 6, pdf_safe_text(f"Method used: {method_used or '-'}"), 0, 1, "L")
-
-                    tech_used = (block.get("technique") or "").strip()
-                    pdf.set_font(theme.font_main, "B", 10)
-                    pdf.set_text_color(*theme.text_dark)
-                    pdf.cell(0, 6, pdf_safe_text(f"{tech_used or 'Technique'} selected"), 0, 1, "L")
-
+                    tech_used = (block.get("technique") or "").strip() or "Comparison"
+                    table_title = (block.get("title") or "").strip()
+            
+                    ensure_space(pdf, 10.0 + max(22.0, estimate_table_height_mm(df_cmp)))
+                    pdf.subtitle(f"2.{result_index} {tech_used}")
+                    result_index += 1
+                    
                     if table_title:
                         pdf.set_font(theme.font_main, "I", 9)
                         pdf.set_text_color(*theme.text_gray)
                         pdf.cell(0, 5, pdf_safe_text(table_title), 0, 1, "L")
                         pdf.set_text_color(*theme.text_dark)
+                     # if only once at the start, remove this line)
+                    pdf_operator_block(pdf, theme, data.get("operator", ""), data.get("op_notes", ""), title="Comparison Matrix traceability")
+
+                    pdf.add_zebra_table(df_cmp)
+                    pdf.ln(1)
 
                     pdf.add_zebra_table(df_cmp)
                     pdf.ln(1)
