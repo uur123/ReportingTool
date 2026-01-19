@@ -833,13 +833,13 @@ def comparison_matrix_editor(
     label: str,
     selected_techniques: List[str],
 ) -> pd.DataFrame:
-    """
+   
     Comparison Matrix table editor:
     - No always-visible paste box
     - Optional import from Excel clipboard in a popover/expander
     - Add column button
     - Rename columns via inputs
-    """
+    
     store_key = f"{editor_key}__df"
     df_current = st.session_state.get(store_key)
 
