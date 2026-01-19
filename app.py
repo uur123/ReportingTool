@@ -1,3 +1,4 @@
+# (Corrected full file)
 import os
 import io
 import datetime
@@ -107,9 +108,9 @@ class AnalyticalReportPDF(FPDF):
 
     # 4) Logo (top-right) — place it BEFORE drawing divider line
         #logo_path = self.meta.get("logo_path")
-        logo_path = "static/logo2.png"
+        logo_path = self.meta.get("logo_path") or "static/logo2.png"
         #if logo_path and os.path.exists(logo_path):
-        if os.path.exists(logo_path):
+        if logo_path and os.path.exists(logo_path):
             try:
                 # Keep it in the header block, not drifting into body
                 x_logo = self.w - self.r_margin - 28  # width-ish reservation
@@ -307,7 +308,7 @@ class AnalyticalReportPDF(FPDF):
 
     def add_techniques_table(self, rows: List[Dict[str, str]], title: str = "Techniques included"):
         """
-        rows: list of dicts with keys: Technique, Method/SOP, Output, Status
+        rows: list of dicts with keys: Technique, Method/SOP, Output
         """
         t = self.theme
         if not rows:
@@ -552,18 +553,18 @@ def technique_output_hint(name: str) -> str:
     m = {
         "ICP-OES": "Elemental concentrations",
         "XRF": "Elemental analysis",
-        "SEM-EDX": "Surface topograpy and Chemistry",
+        "SEM-EDX": "Surface topography and chemistry",
+        "Optical": "Microstructure images",
         "Optical Microscopy": "Microstructure images",
-        "PSD": "Partical Size distribution",
+        "PSD": "Particle size distribution",
         "BET": "Surface area / porosity",
         "XRD": "Crystal Phase identification",
-        "TGA": "Thermal behavious analysis",
+        "TGA": "Thermal behavior analysis",
         "C, S, N Analysis": "C/S/N content",
         "F Analysis": "Fluorine content",
         "Metallic Al Analysis": "Metallic Al %",
         "Metallic Si Analysis": "Metallic Si %",
         "Comparison Matrix": "Comparison tables",
-
     }
     return m.get(name, "—")
 METHOD_HOURS = {
@@ -1446,72 +1447,73 @@ def main():
                 "operator": operator,
                 "op_notes": op_notes,
             }
+
     # --- MODULE: Comparison Matrix (MULTI TABLES + Excel paste) ---
-    if technique_flags["Comparison Matrix"]:
-    with st.expander("📋 Comparison Matrix", expanded=True):
-        st.caption("Add one or more comparison tables. Each table is linked to one Analysis technique.")
+    if technique_flags.get("Comparison Matrix"):
+        with st.expander("📋 Comparison Matrix", expanded=True):
+            st.caption("Add one or more comparison tables. Each table is linked to one Analysis technique.")
 
-        if "cmp_tables_n" not in st.session_state:
-            st.session_state.cmp_tables_n = 1
+            if "cmp_tables_n" not in st.session_state:
+                st.session_state.cmp_tables_n = 1
 
-        cbtn1, cbtn2, _ = st.columns([1, 1, 4])
-        if cbtn1.button("➕ Add table", key="cmp_add_table"):
-            st.session_state.cmp_tables_n += 1
-        if cbtn2.button("➖ Remove last table", key="cmp_remove_table") and st.session_state.cmp_tables_n > 1:
-            st.session_state.cmp_tables_n -= 1
+            cbtn1, cbtn2, _ = st.columns([1, 1, 4])
+            if cbtn1.button("➕ Add table", key="cmp_add_table"):
+                st.session_state.cmp_tables_n += 1
+            if cbtn2.button("➖ Remove last table", key="cmp_remove_table") and st.session_state.cmp_tables_n > 1:
+                st.session_state.cmp_tables_n -= 1
 
-        cmp_tables = []
+            cmp_tables = []
 
-        for i in range(st.session_state.cmp_tables_n):
-            st.markdown(f"#### Comparison Table {i+1}")
+            for i in range(st.session_state.cmp_tables_n):
+                st.markdown(f"#### Comparison Table {i+1}")
 
-            cA, cB = st.columns([1.2, 2.8])
+                cA, cB = st.columns([1.2, 2.8])
 
-            # IMPORTANT: Analysis technique lists ALL measurement techniques
-            tech_choice = cA.selectbox(
-                "Analysis technique",
-                options=ALL_MEASUREMENT_TECHNIQUES + ["Other"],
-                key=f"cmp_tech_{i}",
+                # IMPORTANT: Analysis technique lists ALL measurement techniques
+                tech_choice = cA.selectbox(
+                    "Analysis technique",
+                    options=ALL_MEASUREMENT_TECHNIQUES + ["Other"],
+                    key=f"cmp_tech_{i}",
+                )
+
+                tech_other = ""
+                if tech_choice == "Other":
+                    tech_other = cA.text_input("Technique name", value="", key=f"cmp_tech_other_{i}")
+
+                table_title = cB.text_input(
+                    "Table title (optional)",
+                    value="",
+                    key=f"cmp_title_{i}"
+                )
+
+                df_cmp = comparison_matrix_editor(
+                    default_df=default_comparison_df(),
+                    editor_key=f"cmp_df_{i}",
+                    label=f"Comparison table {i+1}",
+                )
+
+                chosen = tech_other.strip() if tech_choice == "Other" else tech_choice
+
+                cmp_tables.append({
+                    "technique": chosen,
+                    "title": table_title.strip(),
+                    "table": df_cmp
+                })
+
+                st.divider()
+
+            st.markdown("##### Operator traceability (Comparison Matrix)")
+            method_ref, operator, op_notes = add_operator_fields(
+                st.container(), key_prefix="Comparison_Matrix", method_name=""
             )
 
-            tech_other = ""
-            if tech_choice == "Other":
-                tech_other = cA.text_input("Technique name", value="", key=f"cmp_tech_other_{i}")
-
-            table_title = cB.text_input(
-                "Table title (optional)",
-                value="",
-                key=f"cmp_title_{i}"
-            )
-
-            df_cmp = comparison_matrix_editor(
-                default_df=default_comparison_df(),
-                editor_key=f"cmp_df_{i}",
-                label=f"Comparison table {i+1}",
-            )
-
-            chosen = tech_other.strip() if tech_choice == "Other" else tech_choice
-
-            cmp_tables.append({
-                "technique": chosen,
-                "title": table_title.strip(),
-                "table": df_cmp
-            })
-
-            st.divider()
-
-        st.markdown("##### Operator traceability (Comparison Matrix)")
-        method_ref, operator, op_notes = add_operator_fields(
-            st.container(), key_prefix="Comparison_Matrix", method_name=""
-        )
-
-        report_data["Comparison Matrix"] = {
-            "meta": "",
-            "tables": cmp_tables,
-            "method_ref": method_ref,
-            "operator": operator,
-            "op_notes": op_notes,
-        }
+            report_data["Comparison Matrix"] = {
+                "meta": "",
+                "tables": cmp_tables,
+                "method_ref": method_ref,
+                "operator": operator,
+                "op_notes": op_notes,
+            }
 
 """
     if technique_flags["Comparison Matrix"]:
@@ -1819,7 +1821,7 @@ def main():
                 tables = data.get("tables") or []
                 # Print each comparison table as its own subsection, titled by the selected technique
                 for block in tables:
-                   df_cmp = block.get("table") if isinstance(block.get("table"), pd.DataFrame) else None
+                    df_cmp = block.get("table") if isinstance(block.get("table"), pd.DataFrame) else None
                     if df_cmp is None or df_cmp.empty:
                         continue
 
@@ -1835,11 +1837,8 @@ def main():
                         pdf.set_text_color(*theme.text_gray)
                         pdf.cell(0, 5, pdf_safe_text(table_title), 0, 1, "L")
                         pdf.set_text_color(*theme.text_dark)
-                     # if only once at the start, remove this line)
+                    # if only once at the start, remove this line)
                     pdf_operator_block(pdf, theme, data.get("operator", ""), data.get("op_notes", ""), title="Comparison Matrix traceability")
-
-                    pdf.add_zebra_table(df_cmp)
-                    pdf.ln(1)
 
                     pdf.add_zebra_table(df_cmp)
                     pdf.ln(1)
