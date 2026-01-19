@@ -718,6 +718,10 @@ def comparison_matrix_editor(
         new_col = f"New column {len(df_current.columns) + 1}"
         df_current[new_col] = ""
 
+    if c2.button("- Remove column", key=f"{editor_key}__add_col"):
+        new_col = f"New column {len(df_current.columns) - 1}"
+        df_current[new_col] = ""
+
     # Optional import (hidden/compact UI)
     # Prefer popover if available; fallback to expander.
     imported = None
