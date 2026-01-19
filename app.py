@@ -7,36 +7,25 @@ from dataclasses import dataclass
 from typing import Dict, Any, List, Optional, Tuple
 import re
 
-# ---------------------------------------------------------
-# ENGINEERING NOTE: Ensure you have these installed:
+# Requirements:
 # pip install streamlit pandas fpdf2 Pillow
-# ---------------------------------------------------------
 import pandas as pd
 import streamlit as st
 from PIL import Image
 from fpdf import FPDF
 
+
 # -----------------------------------------------------------------------------
 ALL_MEASUREMENT_TECHNIQUES = [
-    "ICP-OES",
-    "XRF",
-    "C, S, N Analysis",
-    "F Analysis",
-    "Metallic Al Analysis",
-    "Metallic Si Analysis",
-    "SEM-EDX",
-    "Optical",
-    "Porosity",
-    "PSD",
-    "BET",
-    "XRD",
-    "TGA",
-    "Al Grain Size",
+    "ICP-OES", "XRF", "C, S, N Analysis", "F Analysis",
+    "Metallic Al Analysis", "Metallic Si Analysis",
+    "SEM-EDX", "Optical", "Porosity", "PSD", "BET",
+    "XRD", "TGA", "Al Grain Size",
 ]
 
 
 # ==============================================================================
-# 1. THEME / PDF ENGINE
+# Theme + PDF engine
 # ==============================================================================
 @dataclass
 class Theme:
@@ -51,6 +40,22 @@ class Theme:
     margin_mm: float = 25.0
 
 
+def pdf_safe_text(s: Any) -> str:
+    """Normalize Unicode to latin-1-safe text for fpdf core fonts."""
+    if s is None:
+        return ""
+    s = str(s)
+    s = (s.replace("\u2014", "-")
+         .replace("\u2013", "-")
+         .replace("\u2212", "-")
+         .replace("\u00a0", " ")
+         .replace("\u2019", "'")
+         .replace("\u2018", "'")
+         .replace("\u201c", '"')
+         .replace("\u201d", '"'))
+    return s.encode("latin-1", "ignore").decode("latin-1")
+
+
 class AnalyticalReportPDF(FPDF):
     def __init__(self, theme: Theme, meta: Dict[str, Any]):
         super().__init__()
@@ -62,17 +67,15 @@ class AnalyticalReportPDF(FPDF):
 
     def header(self):
         t = self.theme
-
-        # single top stripe banner
+        # Single top stripe banner
         self.set_fill_color(220, 220, 220)
         self.rect(0, 0, self.w, 8, style="F")
-
         self.set_font(t.font_main, "B", 7)
         self.set_text_color(100, 100, 100)
         self.set_xy(0, 0)
         self.cell(self.w, 8, pdf_safe_text("INTERNAL USE ONLY - CONFIDENTIAL"), 0, 0, "C")
 
-        # title + optional logo
+        # Title and optional logo
         y_top = 10.0
         logo_h = 10.0
         self.set_font(t.font_main, "B", 13)
@@ -88,13 +91,11 @@ class AnalyticalReportPDF(FPDF):
             except Exception:
                 pass
 
-        # divider
+        # Divider and reserve
         y_line = y_top + 11
         self.set_draw_color(*t.primary)
         self.set_line_width(0.5)
         self.line(self.l_margin, y_line, self.w - self.r_margin, y_line)
-
-        # reserve header height
         self.set_y(y_line + 6.0)
 
     def subtitle(self, title: str):
@@ -165,6 +166,9 @@ class AnalyticalReportPDF(FPDF):
         self.cell(col_w, 5, pdf_safe_text(lab_mail), 0, 0, "C")
         self.cell(col_w, 5, pdf_safe_text(page_str), 0, 1, "R")
 
+    # Add other PDF helpers (add_kv_box, add_techniques_table, add_zebra_table, add_framed_image, etc.)
+    # We'll reuse the implementations from your previous version. For brevity they are included below.
+
     def section_header(self, title: str):
         t = self.theme
         self.ln(5)
@@ -179,27 +183,22 @@ class AnalyticalReportPDF(FPDF):
         t = self.theme
         if not items:
             return
-
         box_w = self.w - self.l_margin - self.r_margin
         x0 = self.l_margin
         y0 = self.get_y()
-
         line_h = 6.0
         pad = 2.5
         title_h = 6.5 if title else 0.0
         rows = (len(items) + cols - 1) // cols
         box_h = title_h + pad + rows * line_h + pad
-
         if self.get_y() + box_h > self.h - self.b_margin:
             self.add_page()
             x0 = self.l_margin
             y0 = self.get_y()
-
         self.set_fill_color(248, 249, 251)
         self.set_draw_color(*t.border_gray)
         self.set_line_width(0.2)
         self.rect(x0, y0, box_w, box_h, style="DF")
-
         cur_y = y0 + pad
         if title:
             self.set_xy(x0 + pad, cur_y)
@@ -207,14 +206,11 @@ class AnalyticalReportPDF(FPDF):
             self.set_text_color(*t.primary)
             self.cell(box_w - 2 * pad, 6, pdf_safe_text(title), 0, 1, "L")
             cur_y = self.get_y()
-
         col_w = (box_w - 2 * pad) / cols
         label_w = col_w * 0.38
         value_w = col_w * 0.62
-
         self.set_font(t.font_main, "", 9)
         self.set_text_color(*t.text_dark)
-
         for r in range(rows):
             self.set_x(x0 + pad)
             y_row = cur_y + r * line_h
@@ -233,31 +229,26 @@ class AnalyticalReportPDF(FPDF):
                 self.set_text_color(*t.text_dark)
                 self.cell(value_w, line_h, pdf_safe_text(value), 0, 0, "L")
             self.ln(line_h)
-
         self.set_y(y0 + box_h + 4.0)
 
     def add_techniques_table(self, rows: List[Dict[str, str]], title: str = "Techniques included"):
         t = self.theme
         if not rows:
             return
-
         df = pd.DataFrame(rows, columns=["Technique", "Method/SOP", "Output"])
         est_h = 7 + min(len(df), 10) * 7 + 10
         if self.get_y() + est_h > self.h - self.b_margin:
             self.add_page()
-
         if title:
             self.set_font(t.font_main, "B", 10)
             self.set_text_color(*t.text_dark)
             self.cell(0, 6, pdf_safe_text(title), 0, 1, "L")
             self.ln(1)
-
         table_w = self.w - self.l_margin - self.r_margin
         w_tech = table_w * 0.25
         w_sop = table_w * 0.25
         w_out = table_w * 0.50
         widths = [w_tech, w_sop, w_out]
-
         self.set_font(t.font_main, "B", 9)
         self.set_fill_color(*t.header_fill)
         self.set_text_color(*t.primary)
@@ -265,7 +256,6 @@ class AnalyticalReportPDF(FPDF):
         for h, w in zip(headers, widths):
             self.cell(w, 7, pdf_safe_text(h), 0, 0, "C", True)
         self.ln()
-
         self.set_font(t.font_main, "", 9)
         self.set_text_color(*t.text_dark)
         for i, row in df.iterrows():
@@ -312,7 +302,6 @@ class AnalyticalReportPDF(FPDF):
                 aspect = h_px / w_px
         except Exception:
             return
-
         max_w = self.w - self.l_margin - self.r_margin
         display_w = min(120, max_w)
         display_h = display_w * aspect
@@ -337,23 +326,51 @@ class AnalyticalReportPDF(FPDF):
 
 
 # ==============================================================================
-# UTILITIES
+# Utilities
 # ==============================================================================
 def ensure_space(pdf: FPDF, needed_mm: float):
     if pdf.get_y() + needed_mm > pdf.h - pdf.b_margin:
         pdf.add_page()
 
 
-def estimate_table_height_mm(df: Optional[pd.DataFrame], row_h: float = 7.0, header_h: float = 7.0, min_rows: int = 2) -> float:
-    if df is None or not isinstance(df, pd.DataFrame) or df.empty:
-        return 0.0
-    n = max(min_rows, min(len(df), 12))
-    return header_h + n * row_h + 2.0
+def pdf_operator_block(pdf: AnalyticalReportPDF, theme: Theme, operator: str, notes: str, title: str = "Analysis Notes"):
+    operator = (operator or "").strip()
+    notes = (notes or "").strip()
+    if not operator and not notes:
+        return
+    pdf.set_x(pdf.l_margin)
+    w = pdf.w - pdf.l_margin - pdf.r_margin
+    pdf.set_font(theme.font_main, "B", 9)
+    pdf.set_text_color(*theme.text_dark)
+    pdf.cell(w, 6, pdf_safe_text(f"{title}:"), 0, 1)
+    pdf.set_font(theme.font_main, "", 9)
+    if operator:
+        pdf.set_x(pdf.l_margin)
+        pdf.multi_cell(w, 5, pdf_safe_text(f"Operator: {operator}"))
+    if notes:
+        safe_notes = pdf_safe_text(notes)
+        safe_notes = re.sub(r"\S{71,}", lambda m: " ".join(m.group(0)[i:i+70] for i in range(0, len(m.group(0)), 70)), safe_notes)
+        pdf.set_x(pdf.l_margin)
+        pdf.multi_cell(w, 5, pdf_safe_text(f"Notes: {safe_notes}"))
+    pdf.ln(2)
+    pdf.set_text_color(*theme.text_dark)
 
 
-def keep_method_with_first_content(pdf: FPDF, df: Optional[pd.DataFrame] = None, extra_mm: float = 0.0):
-    need = 6.0 + 2.0 + 12.0 + estimate_table_height_mm(df) + extra_mm
-    ensure_space(pdf, need)
+def safe_key(s: str) -> str:
+    return "".join(ch if ch.isalnum() else "_" for ch in str(s))
+
+
+def clean_numeric_string(s: str) -> str:
+    if not isinstance(s, str):
+        return s
+    s = s.strip()
+    if re.match(r"^-?\d+(\.\d{3})*,\d+$", s):
+        s = s.replace(".", "").replace(",", ".")
+    elif re.match(r"^-?\d+(,\d{3})*\.\d+$", s):
+        s = s.replace(",", "")
+    elif "," in s and "." not in s:
+        s = s.replace(",", ".")
+    return s
 
 
 def save_upload(uploaded_file, force_ext: Optional[str] = None):
@@ -363,6 +380,20 @@ def save_upload(uploaded_file, force_ext: Optional[str] = None):
         suffix = force_ext or os.path.splitext(uploaded_file.name)[1] or ".png"
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
             tmp.write(uploaded_file.getvalue())
+            return tmp.name
+    except Exception:
+        return None
+
+
+def save_upload_as_jpg(uploaded_file) -> Optional[str]:
+    if uploaded_file is None:
+        return None
+    try:
+        img = Image.open(uploaded_file)
+        if img.mode != "RGB":
+            img = img.convert("RGB")
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
+            img.save(tmp.name, format="JPEG", quality=95)
             return tmp.name
     except Exception:
         return None
@@ -393,167 +424,16 @@ def get_image_size(path: str) -> Optional[Tuple[int, int]]:
         return None
 
 
-def clean_numeric_string(s: str) -> str:
-    if not isinstance(s, str):
-        return s
-    s = s.strip()
-    if re.match(r"^-?\d+(\.\d{3})*,\d+$", s):
-        s = s.replace(".", "").replace(",", ".")
-    elif re.match(r"^-?\d+(,\d{3})*\.\d+$", s):
-        s = s.replace(",", "")
-    elif "," in s and "." not in s:
-        s = s.replace(",", ".")
-    return s
+def estimate_table_height_mm(df: Optional[pd.DataFrame], row_h: float = 7.0, header_h: float = 7.0, min_rows: int = 2) -> float:
+    if df is None or not isinstance(df, pd.DataFrame) or df.empty:
+        return 0.0
+    n = max(min_rows, min(len(df), 12))
+    return header_h + n * row_h + 2.0
 
 
-def save_upload_as_jpg(uploaded_file) -> Optional[str]:
-    if uploaded_file is None:
-        return None
-    try:
-        img = Image.open(uploaded_file)
-        if img.mode != "RGB":
-            img = img.convert("RGB")
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
-            img.save(tmp.name, format="JPEG", quality=95)
-            return tmp.name
-    except Exception:
-        return None
-
-
-def safe_key(s: str) -> str:
-    return "".join(ch if ch.isalnum() else "_" for ch in str(s))
-
-
-def pdf_safe_text(s: Any) -> str:
-    if s is None:
-        return ""
-    s = str(s)
-    s = (s.replace("\u2014", "-")
-         .replace("\u2013", "-")
-         .replace("\u2212", "-")
-         .replace("\u00a0", " ")
-         .replace("\u2019", "'")
-         .replace("\u2018", "'")
-         .replace("\u201c", '"')
-         .replace("\u201d", '"'))
-    return s.encode("latin-1", "ignore").decode("latin-1")
-
-
-def technique_output_hint(name: str) -> str:
-    m = {
-        "ICP-OES": "Elemental concentrations",
-        "XRF": "Elemental analysis",
-        "SEM-EDX": "Surface topography and chemistry",
-        "Optical": "Microstructure images",
-        "PSD": "Particle size distribution",
-        "BET": "Surface area / porosity",
-        "XRD": "Crystal Phase identification",
-        "TGA": "Thermal behavior analysis",
-        "C, S, N Analysis": "C/S/N content",
-        "F Analysis": "Fluorine content",
-        "Metallic Al Analysis": "Metallic Al %",
-        "Metallic Si Analysis": "Metallic Si %",
-        "Comparison Matrix": "Comparison tables",
-    }
-    return m.get(name, "-")
-
-
-# pdf_operator_block moved to module-level so it's available during PDF generation
-def pdf_operator_block(pdf: AnalyticalReportPDF, theme: Theme, operator: str, notes: str, title: str = "Analysis Notes"):
-    operator = (operator or "").strip()
-    notes = (notes or "").strip()
-    if not operator and not notes:
-        return
-
-    pdf.set_x(pdf.l_margin)
-    w = pdf.w - pdf.l_margin - pdf.r_margin
-
-    pdf.set_font(theme.font_main, "B", 9)
-    pdf.set_text_color(*theme.text_dark)
-    pdf.cell(w, 6, pdf_safe_text(f"{title}:"), 0, 1)
-
-    pdf.set_font(theme.font_main, "", 9)
-    if operator:
-        pdf.set_x(pdf.l_margin)
-        pdf.multi_cell(w, 5, pdf_safe_text(f"Operator: {operator}"))
-    if notes:
-        safe_notes = pdf_safe_text(notes)
-        def break_word(m):
-            wv = m.group(0)
-            return " ".join(wv[i: i + 70] for i in range(0, len(wv), 70))
-        safe_notes = re.sub(r"\S{71,}", break_word, safe_notes)
-        pdf.set_x(pdf.l_margin)
-        pdf.multi_cell(w, 5, pdf_safe_text(f"Notes: {safe_notes}"))
-    pdf.ln(2)
-    pdf.set_text_color(*theme.text_dark)
-
-
-METHOD_HOURS = {
-    "ICP-OES": 3.0,
-    "XRF": 1.5,
-    "XRD": 1.5,
-    "SEM-EDX": 3.0,
-    "Optical": 2.0,
-    "Al Grain Size": 3.0,
-    "Porosity": 1.0,
-    "PSD": 2.0,
-    "BET": 2.0,
-    "TGA": 2.0,
-    "F Analysis": 4.0,
-    "C, S, N Analysis": 1.0,
-    "Metallic Al Analysis": 1.0,
-    "Metallic Si Analysis": 1.0,
-}
-
-REPORTING_HOURS = 1.0
-CASTING_DEFECT_HOURS = 32.0
-
-
-def compute_default_hours(technique_flags: Dict[str, bool], context: str) -> float:
-    if context == "Casting Defect Analysis":
-        return CASTING_DEFECT_HOURS
-    base = 0.0
-    any_selected = False
-    for k, v in technique_flags.items():
-        if v:
-            any_selected = True
-            base += float(METHOD_HOURS.get(k, 0.0))
-    if any_selected:
-        base += REPORTING_HOURS
-    return round(base, 2)
-
-
-def technique_status_from_data(data: Dict[str, Any]) -> bool:
-    """
-    Return True if the technique block contains any user-supplied content.
-    """
-    if not isinstance(data, dict):
-        return False
-    has_table = isinstance(data.get("table"), pd.DataFrame) and not data["table"].empty
-    has_images = bool(data.get("images"))
-    has_meta = bool((data.get("meta") or "").strip())
-    has_operator = bool((data.get("operator") or "").strip() or (data.get("op_notes") or "").strip())
-    return bool(has_table or has_images or has_meta or has_operator)
-
-
-def default_comparison_df() -> pd.DataFrame:
-    return pd.DataFrame([{"Parameter": "", "Sample A": "", "Sample B": "", "Unit": ""}])
-
-
-def default_porosity_df() -> pd.DataFrame:
-    return pd.DataFrame([
-        {"Metric": "Porosity (%)", "Value": "", "Unit": "%", "Notes": ""},
-        {"Metric": "Pore size (avg)", "Value": "", "Unit": "µm", "Notes": ""},
-        {"Metric": "Measurement area", "Value": "", "Unit": "", "Notes": ""},
-    ])
-
-
-def default_gsa_df() -> pd.DataFrame:
-    return pd.DataFrame([
-        {"Metric": "Grain size number (G)", "Value": "", "Unit": "", "Notes": ""},
-        {"Metric": "Mean intercept length", "Value": "", "Unit": "µm", "Notes": ""},
-        {"Metric": "n fields", "Value": "", "Unit": "", "Notes": ""},
-    ])
+def keep_method_with_first_content(pdf: FPDF, df: Optional[pd.DataFrame] = None, extra_mm: float = 0.0):
+    need = 6.0 + 2.0 + 12.0 + estimate_table_height_mm(df) + extra_mm
+    ensure_space(pdf, need)
 
 
 def parse_excel_paste(text: str) -> Optional[pd.DataFrame]:
@@ -594,8 +474,110 @@ def parse_excel_paste(text: str) -> Optional[pd.DataFrame]:
     return df
 
 
+def comparison_matrix_editor(*, default_df: pd.DataFrame, editor_key: str, label: str) -> pd.DataFrame:
+    """
+    Compact editor used by the Comparison Matrix UI.
+    Keeps state in session and allows import/rename/add/remove columns.
+    """
+    store_key = f"{editor_key}__df"
+    df_current = st.session_state.get(store_key)
+    if not isinstance(df_current, pd.DataFrame) or df_current.empty:
+        df_current = default_df.copy()
+
+    c1, c2, c3 = st.columns([1.2, 1.2, 3.6])
+    if c1.button("➕ Add column", key=f"{editor_key}__add_col"):
+        base = "New column"
+        idx = 1
+        new_col = f"{base} {idx}"
+        existing = set(map(str, df_current.columns))
+        while new_col in existing:
+            idx += 1
+            new_col = f"{base} {idx}"
+        df_current = df_current.copy()
+        df_current[new_col] = ""
+
+    with c2:
+        try:
+            with st.popover("➖ Remove column", use_container_width=True):
+                st.caption("Select one or more columns to remove (at least 1 column must remain).")
+                cols_now = list(map(str, df_current.columns))
+                to_remove = st.multiselect("Columns to remove", options=cols_now, key=f"{editor_key}__rm_cols")
+                if st.button("Remove selected", key=f"{editor_key}__rm_cols_btn"):
+                    if not to_remove:
+                        st.info("No columns selected.")
+                    else:
+                        remaining = [c for c in cols_now if c not in set(to_remove)]
+                        if len(remaining) < 1:
+                            st.warning("Cannot remove all columns. Keep at least one column.")
+                        else:
+                            df_current = df_current.copy()
+                            df_current = df_current[remaining]
+        except Exception:
+            with st.expander("➖ Remove column (fallback)", expanded=False):
+                st.caption("Select columns to remove")
+                cols_now = list(map(str, df_current.columns))
+                to_remove = st.multiselect("Columns to remove (expander)", options=cols_now, key=f"{editor_key}__rm_cols_fallback")
+                if st.button("Remove selected (expander)", key=f"{editor_key}__rm_cols_btn_fallback"):
+                    if not to_remove:
+                        st.info("No columns selected.")
+                    else:
+                        remaining = [c for c in cols_now if c not in set(to_remove)]
+                        if len(remaining) < 1:
+                            st.warning("Cannot remove all columns. Keep at least one column.")
+                        else:
+                            df_current = df_current.copy()
+                            df_current = df_current[remaining]
+
+    # Import
+    imported = None
+    try:
+        pop = st.popover("📋 Import from Excel", use_container_width=False)
+        with pop:
+            txt = st.text_area("Paste copied Excel range here", key=f"{editor_key}__import_txt", height=120)
+            if st.button("Import", key=f"{editor_key}__import_btn"):
+                imported = parse_excel_paste(txt)
+    except Exception:
+        with c3:
+            with st.expander("📋 Import from Excel", expanded=False):
+                txt = st.text_area("Paste copied Excel range here", key=f"{editor_key}__import_txt", height=120)
+                if st.button("Import", key=f"{editor_key}__import_btn"):
+                    imported = parse_excel_paste(txt)
+
+    if imported is not None:
+        if isinstance(imported, pd.DataFrame) and not imported.empty:
+            df_current = imported
+        else:
+            st.warning("Import failed. Copy a rectangular range (including headers) and try again.")
+
+    st.markdown("**Rename columns**")
+    cols_now = list(df_current.columns)
+    wrap = min(max(len(cols_now), 1), 6)
+    rename_cols = st.columns(wrap)
+    new_names = []
+    for i, col in enumerate(cols_now):
+        col_container = rename_cols[i % wrap]
+        new_name = col_container.text_input(label=f"col_{i}", value=str(col), key=f"{editor_key}__colname_{i}", label_visibility="collapsed")
+        new_names.append(new_name.strip() or str(col))
+    if new_names != list(map(str, df_current.columns)):
+        seen = {}
+        fixed = []
+        for name in new_names:
+            if name not in seen:
+                seen[name] = 1
+                fixed.append(name)
+            else:
+                seen[name] += 1
+                fixed.append(f"{name} ({seen[name]})")
+        df_current = df_current.copy()
+        df_current.columns = fixed
+
+    df_out = st.data_editor(df_current, num_rows="dynamic", use_container_width=True, key=editor_key)
+    st.session_state[store_key] = df_out
+    return df_out
+
+
 # ==============================================================================
-# STREAMLIT UI
+# Streamlit UI (main)
 # ==============================================================================
 def main():
     st.set_page_config(page_title="EN-Report", layout="wide", page_icon="🔬", initial_sidebar_state="collapsed")
@@ -618,7 +600,7 @@ def main():
     st.title("🔬 Scientific Analysis Reporting Tool")
     st.markdown("---")
 
-    # 1. Sample Traceability
+    # 1. Sample traceability (TSR No acts as Project ID)
     st.subheader("1. Sample Traceability")
     with st.container():
         c1, c2, c3, c4 = st.columns(4)
@@ -633,13 +615,13 @@ def main():
         temp = c2.number_input("Temp (°C)", value=21.0)
         hum = c3.number_input("Humidity (%RH)", value=45.0)
         st.markdown("#### Sample condition / requester notes")
-        sample_condition = st.text_area("Sample as received (packaging/condition) & requester comments", placeholder="e.g., Sample received in sealed bag...", height=90)
+        sample_condition = st.text_area("Sample as received & requester comments", placeholder="e.g., Sample received in sealed bag...", height=90)
 
     st.markdown("#### Sample reception photo")
     sample_photo = st.file_uploader("Upload sample photo (as received)", type=["jpg", "jpeg", "png", "tif", "tiff"], key="sample_photo")
     st.divider()
 
-    # 2. Techniques selection
+    # 2. Select techniques
     st.subheader("2. Select Analytical Techniques")
     def add_operator_fields(parent, key_prefix: str):
         parent.markdown("##### Operator traceability")
@@ -671,7 +653,7 @@ def main():
         technique_flags["F Analysis"] = st.checkbox("F Analysis")
         technique_flags["Comparison Matrix"] = st.checkbox("Comparison Matrix")
 
-    # Effort & cost
+    # Effort & cost (compact)
     st.subheader("3. Effort & Cost (optional)")
     default_hours = compute_default_hours(technique_flags, context)
     if "est_hours" not in st.session_state:
@@ -702,8 +684,9 @@ def main():
     report_data.clear()
 
     # -------------------------
-    # Data entry for each technique (preserve behavior)
+    # Populate technique-specific UI and collect report_data
     # -------------------------
+    # (Implementations follow same pattern used previously; keep keys stable)
     if technique_flags.get("ICP-OES"):
         with st.expander("🧪 ICP-OES Data", expanded=True):
             c_a, c_b = st.columns([1, 3])
@@ -806,10 +789,10 @@ def main():
                 meta_parts.append(f"Mag/Scale: {gsa_mag.strip()}")
             report_data["Al Grain Size"] = {"meta": " | ".join(meta_parts), "table": df_gsa, "images": gsa_files, "captions": gsa_captions, "method_ref": method_ref, "operator": operator, "op_notes": op_notes}
 
-    # Comparison Matrix (UI) — add Method/SOP per comparison table
+    # Comparison Matrix UI — include per-table Method/SOP (method_ref)
     if technique_flags.get("Comparison Matrix"):
         with st.expander("📋 Comparison Matrix", expanded=True):
-            st.caption("Add one or more comparison tables. Each table can be linked to an analysis technique. You can also specify Method/SOP for each comparison table.")
+            st.caption("Add one or more comparison tables. Each table can be linked to an analysis technique and include Method/SOP.")
             if "cmp_tables_n" not in st.session_state:
                 st.session_state.cmp_tables_n = 1
             cbtn1, cbtn2, _ = st.columns([1, 1, 4])
@@ -826,19 +809,17 @@ def main():
                 tech_other = ""
                 if tech_choice == "Other":
                     tech_other = cA.text_input("Technique name", value="", key=f"cmp_tech_other_{i}")
-                # Method/SOP per comparison table
-                method_sop_table = cA.text_input("Method / SOP (optional)", value="", key=f"cmp_method_{i}", placeholder="e.g. WI-CMP-001")
+                method_ref_table = cA.text_input("Method / SOP (optional)", value="", key=f"cmp_method_{i}", placeholder="e.g. WI-CMP-001")
                 table_title = cB.text_input("Table title (optional)", value="", key=f"cmp_title_{i}")
                 df_cmp = comparison_matrix_editor(default_df=default_comparison_df(), editor_key=f"cmp_df_{i}", label=f"Comparison table {i+1}")
                 chosen = tech_other.strip() if tech_choice == "Other" else tech_choice
-                cmp_tables.append({"technique": chosen, "title": table_title.strip(), "table": df_cmp, "method_ref": method_sop_table.strip()})
+                cmp_tables.append({"technique": chosen, "title": table_title.strip(), "table": df_cmp, "method_ref": method_ref_table.strip()})
                 st.divider()
-
             st.markdown("##### Operator traceability (Comparison Matrix)")
             method_ref, operator, op_notes = add_operator_fields(st.container(), key_prefix="Comparison_Matrix")
             report_data["Comparison Matrix"] = {"meta": "", "tables": cmp_tables, "method_ref": method_ref, "operator": operator, "op_notes": op_notes}
 
-    # Chemical methods group
+    # Chemical methods group (unchanged)
     CHEM_METHODS = ["C, S, N Analysis", "F Analysis", "Metallic Al Analysis", "Metallic Si Analysis"]
     chem_selected = [m for m in CHEM_METHODS if technique_flags.get(m)]
     if chem_selected:
@@ -891,202 +872,199 @@ def main():
             missing.append("Reviewed by (name)")
         if missing:
             st.error(f"Please complete mandatory fields: {', '.join(missing)}")
-        else:
-            theme = Theme()
-            meta = {"lab_name": lab_name, "lab_addr": lab_addr, "lab_no": lab_no, "lab_mail": lab_mail, "project_title": project_title, "requester": requester, "report_date": str(datetime.date.today()), "logo_path": save_upload(logo), "project_id": sample_id, "revision": int(rev_number)}
-            pdf = AnalyticalReportPDF(theme, meta)
-            pdf.add_page()
+            st.stop()
 
-            # Determine techniques to list (exclude "Comparison Matrix" itself)
-            technique_order = ["ICP-OES", "XRF", "C, S, N Analysis", "F Analysis", "Metallic Al Analysis", "Metallic Si Analysis", "SEM-EDX", "Optical", "Porosity", "PSD", "BET", "XRD", "TGA", "Al Grain Size"]
-            included_set = set(k for k, v in technique_flags.items() if v and k != "Comparison Matrix")
+        theme = Theme()
+        meta = {"lab_name": lab_name, "lab_addr": lab_addr, "lab_no": lab_no, "lab_mail": lab_mail, "project_title": project_title, "requester": requester, "report_date": str(datetime.date.today()), "logo_path": save_upload(logo), "project_id": sample_id, "revision": int(rev_number)}
+        pdf = AnalyticalReportPDF(theme, meta)
+        pdf.add_page()
 
-            # Add techniques referenced in comparison tables
-            cmp_block = report_data.get("Comparison Matrix", {})
-            cmp_tables = cmp_block.get("tables") or []
-            cmp_tech_names = set()
-            cmp_method_map: Dict[str, str] = {}
-            for t in cmp_tables:
-                tname = (t.get("technique") or "").strip()
-                if tname:
-                    cmp_tech_names.add(tname)
-                    # prefer per-table method_ref if supplied
-                    if t.get("method_ref"):
-                        # if multiple tables reference same technique, keep the first non-empty
-                        cmp_method_map.setdefault(tname, t.get("method_ref") or "")
-            for tname in cmp_tech_names:
-                included_set.add(tname)
+        # Build techniques_included: selected techniques OR techniques referenced by comparison tables (exclude "Comparison Matrix" itself)
+        technique_order = ["ICP-OES", "XRF", "C, S, N Analysis", "F Analysis", "Metallic Al Analysis", "Metallic Si Analysis", "SEM-EDX", "Optical", "Porosity", "PSD", "BET", "XRD", "TGA", "Al Grain Size"]
+        included_set = set(k for k, v in technique_flags.items() if v and k != "Comparison Matrix")
 
-            techniques_included = [t for t in technique_order if t in included_set]
+        cmp_block = report_data.get("Comparison Matrix") or {}
+        cmp_tables = cmp_block.get("tables") or []
+        cmp_tech_names = set()
+        cmp_method_map: Dict[str, str] = {}
+        for t in cmp_tables:
+            tname = (t.get("technique") or "").strip()
+            if tname:
+                cmp_tech_names.add(tname)
+                if t.get("method_ref"):
+                    cmp_method_map.setdefault(tname, t.get("method_ref") or "")
 
-            # Info block
-            pdf.section_header_keep(f"1. Project: {context}", first_block_mm=70.0)
-            metadata_items = [
-                ("Project/Report ID", sample_id),
-                ("Requester", requester),
-                ("Sample received", str(rx_date)),
-                ("Project title", project_title),
-                ("Report date", str(datetime.date.today())),
-                ("Revision", str(int(rev_number))),
-                ("Environment", f"{temp}°C / {hum}% RH"),
-            ]
-            pdf.add_kv_box(metadata_items, title="Report and Sample Information", cols=2)
+        for tname in cmp_tech_names:
+            included_set.add(tname)
+
+        techniques_included = [t for t in technique_order if t in included_set]
+
+        # Info block
+        pdf.section_header_keep(f"1. Project: {context}", first_block_mm=70.0)
+        metadata_items = [
+            ("Project/Report ID", sample_id),
+            ("Requester", requester),
+            ("Sample received", str(rx_date)),
+            ("Project title", project_title),
+            ("Report date", str(datetime.date.today())),
+            ("Revision", str(int(rev_number))),
+            ("Environment", f"{temp}°C / {hum}% RH"),
+        ]
+        pdf.add_kv_box(metadata_items, title="Report and Sample Information", cols=2)
+        pdf.set_font(theme.font_main, "", 10)
+        pdf.set_text_color(*theme.text_dark)
+        pdf.ln(2)
+
+        sample_photo_path = save_upload_as_jpg(sample_photo) if sample_photo else None
+        if sample_photo_path and os.path.exists(sample_photo_path):
+            pdf.subtitle("Sample photo (as received)")
+            pdf.add_framed_image(sample_photo_path, caption="Sample as received")
+            cleanup_file(sample_photo_path)
+
+        if sample_condition.strip():
+            pdf.subtitle("Requester notes and Sample condition")
             pdf.set_font(theme.font_main, "", 10)
             pdf.set_text_color(*theme.text_dark)
-            pdf.ln(2)
+            pdf.multi_cell(0, 6, pdf_safe_text(sample_condition.strip()))
+            pdf.ln(1)
 
-            sample_photo_path = save_upload_as_jpg(sample_photo) if sample_photo else None
-            if sample_photo_path and os.path.exists(sample_photo_path):
-                pdf.subtitle("Sample photo (as received)")
-                pdf.add_framed_image(sample_photo_path, caption="Sample as received")
-                cleanup_file(sample_photo_path)
+        # Techniques included (exclude "Comparison Matrix")
+        pdf.subtitle("1.1 Techniques included")
+        tech_rows = []
+        for tech in techniques_included:
+            d = report_data.get(tech, {}) or {}
+            method_sop = (d.get("method_ref") or "").strip() or cmp_method_map.get(tech, "")
+            tech_rows.append({"Technique": tech, "Method/SOP": method_sop, "Output": technique_output_hint(tech)})
+        pdf.add_techniques_table(tech_rows, title="")
 
-            if sample_condition.strip():
-                pdf.subtitle("Requester notes and Sample condition")
-                pdf.set_font(theme.font_main, "", 10)
-                pdf.set_text_color(*theme.text_dark)
-                pdf.multi_cell(0, 6, pdf_safe_text(sample_condition.strip()))
+        pdf.ln(2)
+
+        # Analysis results — avoid duplicate titles (skip printing technique block if technique only exists as comparison reference and has no own data)
+        pdf.section_header_keep("2. Analysis results", first_block_mm=35.0)
+        result_index = 1
+        for tech in techniques_included:
+            data = report_data.get(tech) or {}
+            has_own_data = technique_status_from_data(data)
+            if (tech in cmp_tech_names) and not has_own_data:
+                # skip; will be printed with comparison table
+                continue
+
+            # Reserve
+            first_block = 18.0
+            if isinstance(data.get("table"), pd.DataFrame) and not data["table"].empty:
+                first_block = 28.0
+            elif data.get("images"):
+                first_block = 55.0
+            elif data.get("meta"):
+                first_block = 22.0
+            ensure_space(pdf, 10.0 + first_block)
+
+            pdf.subtitle(f"2.{result_index} {tech}")
+            result_index += 1
+
+            if data.get("meta"):
+                pdf.set_font(theme.font_mono, "", 8)
+                pdf.set_text_color(*theme.text_gray)
+                pdf.multi_cell(0, 5, pdf_safe_text(str(data["meta"])))
                 pdf.ln(1)
+                pdf.set_text_color(*theme.text_dark)
 
-            # Techniques included (do not list "Comparison Matrix")
-            pdf.subtitle("1.1 Techniques included")
-            tech_rows = []
-            for tech in techniques_included:
-                d = report_data.get(tech, {}) or {}
-                # method ref: prefer technique block's method_ref, else comparison table's method_ref
-                method_sop = (d.get("method_ref") or "").strip() or cmp_method_map.get(tech, "")
-                tech_rows.append({"Technique": tech, "Method/SOP": method_sop, "Output": technique_output_hint(tech)})
-            pdf.add_techniques_table(tech_rows, title="")
+            pdf_operator_block(pdf, theme, data.get("operator", ""), data.get("op_notes", ""))
 
-            pdf.ln(2)
-            # Analysis results
-            pdf.section_header_keep("2. Analysis results", first_block_mm=35.0)
-            result_index = 1
+            if isinstance(data.get("table"), pd.DataFrame) and not data["table"].empty:
+                pdf.add_zebra_table(data["table"])
 
-            # Print technique sections but avoid duplicate title when technique appears only as a comparison-table reference.
-            for tech in techniques_included:
-                data = report_data.get(tech) or {}
-                has_own_data = technique_status_from_data(data)
-                # If the technique appears in comparison tables but has no own data, skip printing a blank section here;
-                # the comparison table will be printed below (with the same title).
-                if (tech in cmp_tech_names) and not has_own_data:
-                    continue
+            if data.get("images"):
+                caption_list = (data.get("captions") or "").splitlines()
+                tmp_paths = []
+                try:
+                    for i, img_file in enumerate(data["images"]):
+                        tmp_path = save_upload_as_jpg(img_file)
+                        if not tmp_path:
+                            continue
+                        tmp_paths.append(tmp_path)
+                        cap = caption_list[i] if i < len(caption_list) and caption_list[i].strip() else f"Figure {i+1}"
+                        pdf.add_framed_image(tmp_path, pdf_safe_text(cap))
+                finally:
+                    for p in tmp_paths:
+                        cleanup_file(p)
 
-                # reserve space depending on content
-                first_block = 18.0
-                if isinstance(data.get("table"), pd.DataFrame) and not data["table"].empty:
-                    first_block = 28.0
-                elif data.get("images"):
-                    first_block = 55.0
-                elif data.get("meta"):
-                    first_block = 22.0
+        # Print comparison tables separately — include their Method/SOP
+        cmp_data = report_data.get("Comparison Matrix") or {}
+        cmp_tables = cmp_data.get("tables") or []
+        for block in cmp_tables:
+            df_cmp = block.get("table") if isinstance(block.get("table"), pd.DataFrame) else None
+            if df_cmp is None or df_cmp.empty:
+                continue
+            tech_used = (block.get("technique") or "").strip() or "Comparison"
+            table_title = (block.get("title") or "").strip()
+            method_ref_table = (block.get("method_ref") or "").strip()
 
-                ensure_space(pdf, 10.0 + first_block)
-                pdf.subtitle(f"2.{result_index} {tech}")
-                result_index += 1
+            ensure_space(pdf, 10.0 + max(22.0, estimate_table_height_mm(df_cmp)))
+            pdf.subtitle(f"2.{result_index} {tech_used}")
+            result_index += 1
 
+            if method_ref_table:
+                pdf.set_font(theme.font_mono, "", 8)
+                pdf.set_text_color(*theme.text_gray)
+                pdf.cell(0, 5, pdf_safe_text(f"Method/SOP: {method_ref_table}"), 0, 1, "L")
+                pdf.set_text_color(*theme.text_dark)
+
+            if table_title:
+                pdf.set_font(theme.font_main, "I", 9)
+                pdf.set_text_color(*theme.text_gray)
+                pdf.cell(0, 5, pdf_safe_text(table_title), 0, 1, "L")
+                pdf.set_text_color(*theme.text_dark)
+
+            pdf_operator_block(pdf, theme, cmp_data.get("operator", ""), cmp_data.get("op_notes", ""), title="Comparison Matrix traceability")
+            pdf.add_zebra_table(df_cmp)
+            pdf.ln(1)
+
+        # Chemical analysis grouped
+        chem_items = [(k, v) for k, v in report_data.items() if v.get("group") == "Chemical analysis"]
+        if chem_items:
+            ensure_space(pdf, 18.0)
+            pdf.subtitle(f"2.{result_index} Chemical analysis")
+            result_index += 1
+            sub_i = 1
+            for method_name, data in chem_items:
+                df = data.get("table") if isinstance(data.get("table"), pd.DataFrame) else None
+                keep_method_with_first_content(pdf, df=df)
+                pdf.set_font(theme.font_main, "B", 10)
+                pdf.set_text_color(*theme.text_dark)
+                pdf.cell(0, 6, pdf_safe_text(f"2.{result_index-1}.{sub_i} {method_name}"), 0, 1, "L")
+                sub_i += 1
                 if data.get("meta"):
                     pdf.set_font(theme.font_mono, "", 8)
                     pdf.set_text_color(*theme.text_gray)
                     pdf.multi_cell(0, 5, pdf_safe_text(str(data["meta"])))
-                    pdf.ln(1)
                     pdf.set_text_color(*theme.text_dark)
+                pdf_operator_block(pdf, theme, data.get("operator", ""), data.get("op_notes", ""), title="Method traceability")
+                if df is not None:
+                    pdf.add_zebra_table(df)
 
-                pdf_operator_block(pdf, theme, data.get("operator", ""), data.get("op_notes", ""))
+        # Conclusions
+        pdf.section_header_keep("3. Conclusions / summary", first_block_mm=30.0)
+        pdf.set_font(theme.font_main, "", 10)
+        pdf.set_text_color(*theme.text_dark)
+        conclusion_text = summary.strip() or conclusion_placeholder
+        pdf.multi_cell(0, 6, pdf_safe_text(conclusion_text))
 
-                if isinstance(data.get("table"), pd.DataFrame) and not data["table"].empty:
-                    pdf.add_zebra_table(data["table"])
+        # Sign-off
+        pdf.section_header_keep("4. Sign-off", first_block_mm=25.0)
+        pdf.add_signoff_two_columns(left_label="Reported by", left_name=reported_by, left_title=reported_title, right_label="Reviewed by", right_name=reviewed_by, right_title=reviewed_title)
 
-                if data.get("images"):
-                    caption_list = (data.get("captions") or "").splitlines()
-                    tmp_paths = []
-                    try:
-                        for i, img_file in enumerate(data["images"]):
-                            tmp_path = save_upload_as_jpg(img_file)
-                            if not tmp_path:
-                                continue
-                            tmp_paths.append(tmp_path)
-                            cap = caption_list[i] if i < len(caption_list) and caption_list[i].strip() else f"Figure {i+1}"
-                            pdf.add_framed_image(tmp_path, pdf_safe_text(cap))
-                    finally:
-                        for p in tmp_paths:
-                            cleanup_file(p)
-
-            # Comparison Matrix tables printed separately (each with its own Method/SOP)
-            cmp_data = report_data.get("Comparison Matrix") or {}
-            cmp_tables = cmp_data.get("tables") or []
-            for block in cmp_tables:
-                df_cmp = block.get("table") if isinstance(block.get("table"), pd.DataFrame) else None
-                if df_cmp is None or df_cmp.empty:
-                    continue
-                tech_used = (block.get("technique") or "").strip() or "Comparison"
-                table_title = (block.get("title") or "").strip()
-                method_ref_table = (block.get("method_ref") or "").strip()
-
-                ensure_space(pdf, 10.0 + max(22.0, estimate_table_height_mm(df_cmp)))
-                pdf.subtitle(f"2.{result_index} {tech_used}")
-                result_index += 1
-
-                if method_ref_table:
-                    pdf.set_font(theme.font_mono, "", 8)
-                    pdf.set_text_color(*theme.text_gray)
-                    pdf.cell(0, 5, pdf_safe_text(f"Method/SOP: {method_ref_table}"), 0, 1, "L")
-                    pdf.set_text_color(*theme.text_dark)
-
-                if table_title:
-                    pdf.set_font(theme.font_main, "I", 9)
-                    pdf.set_text_color(*theme.text_gray)
-                    pdf.cell(0, 5, pdf_safe_text(table_title), 0, 1, "L")
-                    pdf.set_text_color(*theme.text_dark)
-
-                pdf_operator_block(pdf, theme, cmp_data.get("operator", ""), cmp_data.get("op_notes", ""), title="Comparison Matrix traceability")
-                pdf.add_zebra_table(df_cmp)
-                pdf.ln(1)
-
-            # Chemical group
-            chem_items = [(k, v) for k, v in report_data.items() if v.get("group") == "Chemical analysis"]
-            if chem_items:
-                ensure_space(pdf, 18.0)
-                pdf.subtitle(f"2.{result_index} Chemical analysis")
-                result_index += 1
-                sub_i = 1
-                for method_name, data in chem_items:
-                    df = data.get("table") if isinstance(data.get("table"), pd.DataFrame) else None
-                    keep_method_with_first_content(pdf, df=df)
-                    pdf.set_font(theme.font_main, "B", 10)
-                    pdf.set_text_color(*theme.text_dark)
-                    pdf.cell(0, 6, pdf_safe_text(f"2.{result_index-1}.{sub_i} {method_name}"), 0, 1, "L")
-                    sub_i += 1
-                    if data.get("meta"):
-                        pdf.set_font(theme.font_mono, "", 8)
-                        pdf.set_text_color(*theme.text_gray)
-                        pdf.multi_cell(0, 5, pdf_safe_text(str(data["meta"])))
-                        pdf.set_text_color(*theme.text_dark)
-                    pdf_operator_block(pdf, theme, data.get("operator", ""), data.get("op_notes", ""), title="Method traceability")
-                    if df is not None:
-                        pdf.add_zebra_table(df)
-
-            # Conclusions
-            pdf.section_header_keep("3. Conclusions / summary", first_block_mm=30.0)
-            pdf.set_font(theme.font_main, "", 10)
-            pdf.set_text_color(*theme.text_dark)
-            conclusion_text = summary.strip() or conclusion_placeholder
-            pdf.multi_cell(0, 6, pdf_safe_text(conclusion_text))
-
-            # Sign-off
-            pdf.section_header_keep("4. Sign-off", first_block_mm=25.0)
-            pdf.add_signoff_two_columns(left_label="Reported by", left_name=reported_by, left_title=reported_title, right_label="Reviewed by", right_name=reviewed_by, right_title=reviewed_title)
-
-            # Output
-            try:
-                out = pdf.output(dest="S")
-                pdf_bytes = out.encode("latin-1", "ignore") if isinstance(out, str) else bytes(out)
-                cleanup_file(meta["logo_path"])
-                st.success("✅ Report Generated! Download below.")
-                st.download_button(label="📥 Download PDF", data=pdf_bytes, file_name=f"{sample_id}.pdf", mime="application/pdf")
-            except Exception as e:
-                st.error(f"Error generating PDF: {e}")
+        # Output
+        try:
+            out = pdf.output(dest="S")
+            pdf_bytes = out.encode("latin-1", "ignore") if isinstance(out, str) else bytes(out)
+            cleanup_file(meta["logo_path"])
+            st.success("✅ Report Generated! Download below.")
+            st.download_button(label="📥 Download PDF", data=pdf_bytes, file_name=f"{sample_id}.pdf", mime="application/pdf")
+        except Exception as e:
+            st.error(f"Error generating PDF: {e}")
 
 
+# Run
 if __name__ == "__main__":
     main()
