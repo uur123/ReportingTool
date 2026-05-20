@@ -49,15 +49,19 @@ if uploaded_file is not None:
     # Clean up micro-noise inside the solid material
     solid_struts = cv2.morphologyEx(solid_struts, cv2.MORPH_CLOSE, np.ones((3,3), np.uint8))
     
-    # Skeletonization: Reduce struts to a 1-pixel-thick line representation
-    # This exposes the "topology" of the sponge mesh grid
-    skeleton = cv2.ximgproc.thinning(solid_struts, thinningType=cv2.ximgproc.THINNING_ZHANGSUEN)
+    # --- ALTERNATIVE SKELETONIZATION USING DISTANCE TRANSFORM ---
+    # Calculates distance from each white pixel to the nearest black background pixel
+    dist = cv2.distanceTransform(solid_struts, cv2.DIST_L2, 3)
+    # The peaks/local maxima of this distance map represent the ridge-lines (skeleton) of the struts
+    cv2.normalize(dist, dist, 0, 1.0, cv2.NORM_MINMAX)
+    # Extract the ridges by looking for pixels slightly higher than their neighbors
+    skeleton = np.zeros_like(solid_struts)
+    skeleton[(dist > 0.2) & (dist == cv2.dilate(dist, np.ones((3,3))))] = 255
     
     # Identify Endpoints (where a line just ends without hitting a junction node)
     # Define Hit-or-Miss lookup kernels to find line endings in 8 directions
     endpoints_mask = np.zeros_like(skeleton)
     
-    # Basic lookup kernels for endpoints (1 pixel surrounded by zeros)
     kernels = [
         np.array([[-1, -1, -1], [-1,  1, -1], [-1,  1, -1]]), # Vertical bottom-end
         np.array([[-1,  1, -1], [-1,  1, -1], [-1, -1, -1]]), # Vertical top-end
@@ -74,7 +78,6 @@ if uploaded_file is not None:
         endpoints_mask = cv2.bitwise_or(endpoints_mask, hit_miss)
         
     # Pair Matching: Group endpoints facing each other across a small split gap
-    # Dilate endpoints slightly to see if opposing broken ends touch each other
     dilated_endpoints = cv2.dilate(endpoints_mask, cv2.getStructuringElement(cv2.MORPH_RECT, (max_gap_size, max_gap_size)))
     num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(dilated_endpoints)
     
@@ -84,7 +87,6 @@ if uploaded_file is not None:
     
     for i in range(1, num_labels):
         # Count how many individual endpoint points fall inside this small neighborhood box
-        # If a single strut snapped, it produces exactly 2 endpoints facing one another
         pixels_in_component = endpoints_mask[labels == i]
         endpoint_count = np.count_nonzero(pixels_in_component)
         
@@ -111,7 +113,6 @@ if uploaded_file is not None:
         with col3:
             st.image(solid_struts, caption="Isolated Solid Struts (White Matrix)", use_container_width=True)
         with col4:
-            # Upscale skeleton line slightly so it's easily visible in the UI
             visible_skeleton = cv2.dilate(skeleton, np.ones((2,2), np.uint8))
             st.image(visible_skeleton, caption="1-Pixel Skeleton Grid Model", use_container_width=True)
 else:
