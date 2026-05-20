@@ -3,90 +3,97 @@ import numpy as np
 import cv2
 
 # Page configuration
-st.set_page_config(page_title="Image Roughness Analyzer", layout="centered")
+st.set_page_config(page_title="Sponge Crack Detector", layout="centered")
 
-st.title("🔬 Image Surface Roughness Analyzer")
-st.write("Upload an image to estimate surface roughness ($S_a$ and $S_q$) based on pixel intensity variations.")
+st.title("🧽 Sponge Crack Detection System")
+st.write("Isolates and scores linear cracks in highly porous materials by filtering out natural pores.")
 
 # Sidebar Controls
-st.sidebar.header("Calibration Settings")
-# Conversion factor: How many micrometers does one pixel represent horizontally/vertically?
-microns_per_pixel = st.sidebar.slider(
-    "Pixel Scale (µm per pixel)", 
-    min_value=0.1, 
-    max_value=100.0, 
-    value=1.0, 
-    step=0.1,
-    help="Horizontal calibration factor to map pixels to physical distance."
+st.sidebar.header("Defect Sensitivity Settings")
+kernel_size = st.sidebar.slider(
+    "Pore Filter Size", 
+    min_value=3, 
+    max_value=31, 
+    value=11, 
+    step=2,
+    help="Increase this value if natural pores are accidentally being flagged as cracks."
 )
 
-# Height scale factor: maps grayscale (0-255) to a physical height range in microns
-height_scale = st.sidebar.slider(
-    "Max Peak Height Mapping (µm)", 
-    min_value=1.0, 
-    max_value=1000.0, 
-    value=50.0, 
-    step=1.0,
-    help="Maps the brightest white pixel (255) to this physical height value in micrometers."
+crack_threshold = st.sidebar.slider(
+    "Darkness Sensitivity", 
+    min_value=10, 
+    max_value=150, 
+    value=60, 
+    help="Lower values catch only very dark/deep cracks. Higher values catch shallower cracks."
 )
 
-# File Uploader
-uploaded_file = st.file_uploader("Choose an image file...", type=["jpg", "jpeg", "png", "bmp", "tiff"])
+uploaded_file = st.file_uploader("Upload sponge surface image...", type=["jpg", "jpeg", "png", "bmp", "tiff"])
 
 if uploaded_file is not None:
-    # Read image file buffer into bytes
+    # Load Image
     file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
-    image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-    
-    # Display the uploaded image
-    st.image(image, channels="BGR", caption="Uploaded Image", use_container_width=True)
+    orig_img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
     
     # 1. Preprocessing
-    # Convert to grayscale
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    # Apply Gaussian Blur to filter out microscopic high-frequency sensor noise
+    gray = cv2.cvtColor(orig_img, cv2.COLOR_BGR2GRAY)
+    # Apply a light blur to smooth internal pore textures
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
     
-    # 2. Map Pixels to Physical Height Matrix Z(x,y)
-    # Normalize 0-255 scale to 0.0-1.0, then scale to maximum physical height input
-    Z = (blurred / 255.0) * height_scale
+    # 2. Adaptive Thresholding to extract ALL dark spaces (Pores + Cracks)
+    # Binary inverse: Shadows become White (255), surface becomes Black (0)
+    all_voids = cv2.adaptiveThreshold(
+        blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+        cv2.THRESH_BINARY_INV, 51, crack_threshold - 50
+    )
     
-    # Get matrix dimensions
-    M, N = Z.shape
+    # 3. Morphological Filtering to Separate Pores from Cracks
+    # Create a circular kernel to mimic natural pore shapes
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
     
-    with st.spinner("Calculating roughness metrics..."):
-        # Calculate mean height plane (μ)
-        mean_height = np.mean(Z)
-        
-        # Calculate Arithmetic Mean Roughness (Sa)
-        sa = np.mean(np.abs(Z - mean_height))
-        
-        # Calculate Root Mean Square Roughness (Sq)
-        sq = np.sqrt(np.mean((Z - mean_height) ** 2))
+    # 'Opening' eliminates features smaller/narrower than the kernel (erases fine cracks)
+    only_pores = cv2.morphologyEx(all_voids, cv2.MORPH_OPEN, kernel)
     
-    # Display results
-    st.header("📊 Roughness Scores")
+    # Subtract pores from the total voids map to isolate the long, narrow cracks
+    only_cracks = cv2.subtract(all_voids, only_pores)
+    
+    # Clean up random single-pixel noise from the final crack map
+    only_cracks = cv2.morphologyEx(only_cracks, cv2.MORPH_OPEN, np.ones((3,3), np.uint8))
+    
+    # 4. Calculate Defect Score
+    total_pixels = only_cracks.size
+    crack_pixels = np.count_nonzero(only_cracks)
+    defect_percentage = (crack_pixels / total_pixels) * 100
+    
+    # Define simple pass/fail status
+    status = "🔴 FAIL (Crack Detected)" if defect_percentage > 0.5 else "🟢 PASS"
+    
+    # Display Visualizations Side-by-Side
+    st.header(f"Inspection Result: {status}")
     
     col1, col2 = st.columns(2)
     with col1:
-        st.metric(
-            label="Arithmetic Mean Roughness (Sa)", 
-            value=f"{sa:.4f} µm",
-            help="Average absolute deviation from the mean plane surface height."
-        )
+        st.image(orig_img, channels="BGR", caption="Original Sponge Surface", use_container_width=True)
     with col2:
-        st.metric(
-            label="Root Mean Square Roughness (Sq)", 
-            value=f"{sq:.4f} µm",
-            help="Standard deviation of the surface height profile. Highly sensitive to extreme peaks and valleys."
-        )
+        # Create an overlay map (Red highlights where cracks are detected)
+        overlay = orig_img.copy()
+        overlay[only_cracks == 255] = [0, 0, 255] # Paint crack pixels red
+        st.image(overlay, channels="BGR", caption="Detected Cracks (Red Overlay)", use_container_width=True)
         
-    # Additional Context Metrics
-    st.subheader("Surface Dimensions")
-    physical_width = N * microns_per_pixel
-    physical_height = M * microns_per_pixel
-    st.write(f"**Analyzed Resolution:** {N} x {M} pixels")
-    st.write(f"**Physical Area Evaluated:** {physical_width:.2f} µm x {physical_height:.2f} µm")
+    # Metrics
+    st.subheader("Analysis Metrics")
+    st.metric(
+        label="Crack Density Score", 
+        value=f"{defect_percentage:.2f} %",
+        help="Percentage of the visible surface area identified as a crack defect."
+    )
+    
+    # Diagnostic views for debugging lighting/pores
+    with st.expander("See Diagnostic Binary Maps"):
+        col3, col4 = st.columns(2)
+        with col3:
+            st.image(all_voids, caption="Step 1: All Voids Detected", use_container_width=True)
+        with col4:
+            st.image(only_pores, caption="Step 2: Natural Pores Isolated", use_container_width=True)
 
 else:
-    st.info("Please upload an image file to begin calculations.")
+    st.info("Please upload an image of the sponge surface to run the crack check.")
