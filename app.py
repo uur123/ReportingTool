@@ -5,31 +5,40 @@ from streamlit_cropper import st_cropper
 from PIL import Image
 
 # Page configuration
-st.set_page_config(page_title="Hairline Strut Crack Detector", layout="centered")
+st.set_page_config(page_title="Multi-Layer Crack Filter", layout="centered")
 
-st.title("🔬 Hairline Strut Crack Detector")
-st.write("Specialized filter optimized to detect tight, thin fractures cutting across solid porous structures.")
+st.title("🧽 Multi-Layered Sponge Vector Crack Detector")
+st.write("Isolates deep fractures by filtering out chaotic background layers using localized directional texture tuning.")
 
 # Sidebar Settings
-st.sidebar.header("Crack Detection Adjustments")
+st.sidebar.header("Gabor Wave Vector Tuning")
 
-crack_sensitivity = st.sidebar.slider(
-    "Crack Sensitivity", 
+crack_angle = st.sidebar.slider(
+    "Target Crack Angle (Degrees)", 
+    min_value=0, 
+    max_value=180, 
+    value=0,
+    help="0° targets horizontal cracks. 90° targets vertical cracks. Adjust to match the orientation of the crack."
+)
+
+crack_thickness = st.sidebar.slider(
+    "Crack Thickness Scale (Wavelength)", 
+    min_value=2.0, 
+    max_value=30.0, 
+    value=6.0, 
+    step=0.5,
+    help="Matches the pixel thickness of the hairline crack. Smaller numbers catch tighter tears."
+)
+
+anomaly_threshold = st.sidebar.slider(
+    "Detection Sensitivity Threshold", 
     min_value=10, 
-    max_value=100, 
-    value=35,
-    help="Lower values detect fainter, tighter cracks. Higher values prevent noise from triggering alarms."
+    max_value=255, 
+    value=130,
+    help="Lower values find subtle aligned micro-cracks. Higher values ensure only heavy fractures break through."
 )
 
-min_crack_width_pixels = st.sidebar.slider(
-    "Minimum Crack Length (Pixels)", 
-    min_value=5, 
-    max_value=100, 
-    value=25,
-    help="Filters out tiny pore textures. Only keeps continuous linear cracks."
-)
-
-uploaded_file = st.file_uploader("Upload sponge surface image...", type=["jpg", "jpeg", "png", "bmp", "tiff"])
+uploaded_file = st.file_uploader("Upload multi-layered sponge image...", type=["jpg", "jpeg", "png", "bmp", "tiff"])
 
 if uploaded_file is not None:
     pil_image = Image.open(uploaded_file)
@@ -38,75 +47,72 @@ if uploaded_file is not None:
     cropped_pil = st_cropper(pil_image, realtime_update=True, box_color='#FF0000', aspect_ratio=None)
     orig_img = cv2.cvtColor(np.array(cropped_pil), cv2.COLOR_RGB2BGR)
     
-    # --- ANALYSIS PIPELINE ---
-    st.subheader("2. Crack Detection Output")
+    # --- GABOR DIRECTIONAL VECTOR PIPELINE ---
+    st.subheader("2. Directional Texture Response")
     
     gray = cv2.cvtColor(orig_img, cv2.COLOR_BGR2GRAY)
     
-    # Step 1: Smooth out the fine micro-textures of the sponge wall without losing the crack line
-    blurred = cv2.bilateralFilter(gray, 9, 75, 75)
+    # Construct a Gabor Filter tailored to catch lines at a specific angle
+    # theta: Orientation angle converted to radians
+    theta = np.deg2rad(crack_angle)
+    # sigma: Gaussian envelope bandwidth size
+    sigma = crack_thickness * 0.5
+    # lambda: Wavelength of the sinusoidal factor
+    lambd = crack_thickness
+    # gamma: Spatial aspect ratio (0.5 forces elongation along the target line)
+    gamma = 0.5
+    # psi: Phase offset
+    psi = 0
     
-    # Step 2: Use Sobel derivative to find sharp horizontal transitions (Vertical changes)
-    # This specifically targets lines slicing across the struts
-    sobel_y = cv2.Sobel(blurred, cv2.CV_64F, 0, 1, ksize=3)
-    sobel_y = np.abs(sobel_y)
-    sobel_y = np.uint8(np.clip(sobel_y, 0, 255))
+    gabor_kernel = cv2.getGaborKernel((21, 21), sigma, theta, lambd, gamma, psi, ktype=cv2.CV_32F)
     
-    # Step 3: Adaptive thresholding on the gradient map to isolate the sharpest crack lines
-    # This bypasses the overall 3D shadows of the pores
-    binary_cracks = cv2.adaptiveThreshold(
-        sobel_y, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-        cv2.THRESH_BINARY, 15, - (105 - crack_sensitivity)
-    )
+    # Run the directional filter over the multi-layer image
+    gabor_response = cv2.filter2D(gray, cv2.CV_8U, gabor_kernel)
     
-    # Mask out the deep, dark open voids so we aren't scanning empty air space
-    _, void_mask = cv2.threshold(blurred, 50, 255, cv2.THRESH_BINARY_INV)
-    binary_cracks = cv2.bitwise_and(binary_cracks, cv2.bitwise_not(void_mask))
+    # Enhance local contrast to pull the crack out of depth shadows
+    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+    enhanced_response = clahe.apply(gabor_response)
     
-    # Step 4: Clean noise and group continuous lines
-    kernel_clean = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 1)) # Horizontal alignment priority
-    binary_cracks = cv2.morphologyEx(binary_cracks, cv2.MORPH_CLOSE, kernel_clean)
+    # Isolate strong directional alignment peaks
+    _, binary_anomalies = cv2.threshold(enhanced_response, anomaly_threshold, 255, cv2.THRESH_BINARY)
     
-    # Step 5: Filter by size to ensure we only circle actual lines
-    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(binary_cracks)
+    # Link nearby fragments along the horizontal crack path using morphological closing
+    kernel_close = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 3) if crack_angle in range(0, 45) or crack_angle in range(135, 181) else (3, 15))
+    linked_cracks = cv2.morphologyEx(binary_anomalies, cv2.MORPH_CLOSE, kernel_close)
+    
+    # Filter out remaining non-linear background noise fragments using contour analysis
+    contours, _ = cv2.findContours(linked_cracks, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
     output_display = orig_img.copy()
-    detected_cracks_count = 0
-    final_crack_mask = np.zeros_like(binary_cracks)
+    crack_indicators_count = 0
     
-    for i in range(1, num_labels):
-        area = stats[i, cv2.CC_STAT_AREA]
-        width = stats[i, cv2.CC_STAT_WIDTH]
-        height = stats[i, cv2.CC_STAT_HEIGHT]
+    for cnt in contours:
+        x, y, w, h = cv2.boundingRect(cnt)
+        max_dim = max(w, h)
         
-        # We look for features that are wider than they are tall (horizontal crack direction)
-        # and meet our length requirement
-        max_dimension = max(width, height)
-        
-        if max_dimension >= min_crack_width_pixels and area > 10:
-            final_crack_mask[labels == i] = 255
-            detected_cracks_count += 1
-            
-            # Draw a bounding rectangle box around the detected crack line
-            x, y, w, h = stats[i, cv2.CC_STAT_LEFT], stats[i, cv2.CC_STAT_TOP], stats[i, cv2.CC_STAT_WIDTH], stats[i, cv2.CC_STAT_HEIGHT]
-            cv2.rectangle(output_display, (x - 5, y - 5), (x + w + 5, y + h + 5), (0, 0, 255), 2)
+        # Real cracks spanning across structural components will have an expanded bounding length
+        if max_dim >= 20:
+            crack_indicators_count += 1
+            cv2.rectangle(output_display, (x - 2, y - 2), (x + w + 2, y + h + 2), (0, 0, 255), 2)
+            cv2.putText(output_display, "VECTOR DEFECT", (x, y - 6), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1)
 
     # UI Assessment Display
-    status = f"🔴 FAIL ({detected_cracks_count} Hairline Fracture(s) Caught)" if detected_cracks_count > 0 else "🟢 PASS"
+    status = f"🔴 FAIL ({crack_indicators_count} Aligned Fractures Isolated)" if crack_indicators_count > 0 else "🟢 PASS"
     st.markdown(f"### Inspection Assessment: {status}")
     
     col1, col2 = st.columns(2)
     with col1:
-        st.image(orig_img, channels="BGR", caption="Input Sponge View", use_container_width=True)
+        st.image(orig_img, channels="BGR", caption="Input Multi-Layer Image", use_container_width=True)
     with col2:
-        st.image(output_display, channels="BGR", caption="Detected Crack Locations (Red Boxes)", use_container_width=True)
+        st.image(output_display, channels="BGR", caption="Isolated Linear Anomalies (Red Boxes)", use_container_width=True)
         
-    # Micro Diagnostic Views for Tuning
-    with st.expander("Show Gradient Diagnostics"):
+    # Multi-Layer Diagnostics
+    with st.expander("Show Directional Vector Diagnostic Maps"):
         col3, col4 = st.columns(2)
         with col3:
-            st.image(sobel_y, caption="Step 1: Directional Gradient Map (Highlights Cross-Cuts)", use_container_width=True)
+            st.image(enhanced_response, caption="Gabor Filter Output (Isolates Aligned Waves)", use_container_width=True)
         with col4:
-            st.image(binary_cracks, caption="Step 2: Isolated Threshold Lines", use_container_width=True)
+            st.image(linked_cracks, caption="Binarized Linear Wave Patterns", use_container_width=True)
 else:
-    st.info("Upload your sample image to test the updated gradient hairline detector.")
+    st.info("Upload your multi-layered sample image to execute anisotropic frequency filtering.")
