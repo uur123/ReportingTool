@@ -5,3 +5,5 @@ fpdf2
 streamlit
 numpy
 opencv-python-headless
+streamlit-cropper
+
