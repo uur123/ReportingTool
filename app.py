@@ -3,116 +3,116 @@ import numpy as np
 import cv2
 from streamlit_cropper import st_cropper
 from PIL import Image
+import queue
 
 # Page configuration
-st.set_page_config(page_title="Multi-Layer Crack Filter", layout="centered")
+st.set_page_config(page_title="Pathfinding Crack Tracker", layout="centered")
 
-st.title("🧽 Multi-Layered Sponge Vector Crack Detector")
-st.write("Isolates deep fractures by filtering out chaotic background layers using localized directional texture tuning.")
+st.title("🧽 Pathfinding Flow-Field Crack Tracker")
+st.write("Tracks fractures by treating the strut as a structural wall and searching for low-resistance path shortcuts cutting across it.")
 
 # Sidebar Settings
-st.sidebar.header("Gabor Wave Vector Tuning")
+st.sidebar.header("Pathfinding Mechanics")
 
-crack_angle = st.sidebar.slider(
-    "Target Crack Angle (Degrees)", 
-    min_value=0, 
-    max_value=180, 
-    value=0,
-    help="0° targets horizontal cracks. 90° targets vertical cracks. Adjust to match the orientation of the crack."
-)
-
-crack_thickness = st.sidebar.slider(
-    "Crack Thickness Scale (Wavelength)", 
-    min_value=2.0, 
-    max_value=30.0, 
-    value=6.0, 
-    step=0.5,
-    help="Matches the pixel thickness of the hairline crack. Smaller numbers catch tighter tears."
-)
-
-anomaly_threshold = st.sidebar.slider(
-    "Detection Sensitivity Threshold", 
+wall_density = st.sidebar.slider(
+    "Strut Solid Resistance", 
     min_value=10, 
-    max_value=255, 
-    value=130,
-    help="Lower values find subtle aligned micro-cracks. Higher values ensure only heavy fractures break through."
+    max_value=250, 
+    value=180,
+    help="Determines how hard the solid material resists path crossing. Higher values focus tracking inside tight cuts."
 )
 
-uploaded_file = st.file_uploader("Upload multi-layered sponge image...", type=["jpg", "jpeg", "png", "bmp", "tiff"])
+scan_spacing = st.sidebar.slider(
+    "Scan Step Density (Pixels)", 
+    min_value=5, 
+    max_value=50, 
+    value=20,
+    help="Controls how many entry/exit checkpoint paths are cross-checked over the material surface."
+)
+
+uploaded_file = st.file_uploader("Upload sponge surface image...", type=["jpg", "jpeg", "png", "bmp", "tiff"])
 
 if uploaded_file is not None:
     pil_image = Image.open(uploaded_file)
     
-    st.subheader("1. Select Inspection Area")
+    st.subheader("1. Crop the Active Fracture Zone")
     cropped_pil = st_cropper(pil_image, realtime_update=True, box_color='#FF0000', aspect_ratio=None)
     orig_img = cv2.cvtColor(np.array(cropped_pil), cv2.COLOR_RGB2BGR)
     
-    # --- GABOR DIRECTIONAL VECTOR PIPELINE ---
-    st.subheader("2. Directional Texture Response")
+    st.subheader("2. Tracked Failure Flow-Path")
     
     gray = cv2.cvtColor(orig_img, cv2.COLOR_BGR2GRAY)
+    # Apply a heavy bilateral filter to erase the texture patterns of lower layers while keeping the foreground strut edges crisp
+    smoothed = cv2.bilateralFilter(gray, 15, 80, 80)
     
-    # Construct a Gabor Filter tailored to catch lines at a specific angle
-    # theta: Orientation angle converted to radians
-    theta = np.deg2rad(crack_angle)
-    # sigma: Gaussian envelope bandwidth size
-    sigma = crack_thickness * 0.5
-    # lambda: Wavelength of the sinusoidal factor
-    lambd = crack_thickness
-    # gamma: Spatial aspect ratio (0.5 forces elongation along the target line)
-    gamma = 0.5
-    # psi: Phase offset
-    psi = 0
+    # Generate a Cost Map: Brighter strut pixels have high cost. Dark crack pixels have low cost.
+    # We invert the grayscale so that the background/strut becomes a high-cost mountain ridge
+    cost_map = np.uint8(np.clip(smoothed.astype(np.int32) * (wall_density / 255.0), 1, 255))
     
-    gabor_kernel = cv2.getGaborKernel((21, 21), sigma, theta, lambd, gamma, psi, ktype=cv2.CV_32F)
+    H, W = cost_map.shape
+    crack_overlay = orig_img.copy()
+    shortcut_map = np.zeros_like(gray)
     
-    # Run the directional filter over the multi-layer image
-    gabor_response = cv2.filter2D(gray, cv2.CV_8U, gabor_kernel)
-    
-    # Enhance local contrast to pull the crack out of depth shadows
-    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
-    enhanced_response = clahe.apply(gabor_response)
-    
-    # Isolate strong directional alignment peaks
-    _, binary_anomalies = cv2.threshold(enhanced_response, anomaly_threshold, 255, cv2.THRESH_BINARY)
-    
-    # Link nearby fragments along the horizontal crack path using morphological closing
-    kernel_close = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 3) if crack_angle in range(0, 45) or crack_angle in range(135, 181) else (3, 15))
-    linked_cracks = cv2.morphologyEx(binary_anomalies, cv2.MORPH_CLOSE, kernel_close)
-    
-    # Filter out remaining non-linear background noise fragments using contour analysis
-    contours, _ = cv2.findContours(linked_cracks, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    
-    output_display = orig_img.copy()
-    crack_indicators_count = 0
-    
-    for cnt in contours:
-        x, y, w, h = cv2.boundingRect(cnt)
-        max_dim = max(w, h)
+    # Dijkstra/A* Pathfinding implementation tailored to find the path of least resistance across the columns
+    def find_leak_path(cost_grid, start_y, end_y):
+        # priority queue stores: (total_cost, current_x, current_y, path_history)
+        pq = queue.PriorityQueue()
+        pq.put((int(cost_grid[start_y, 0]), 0, start_y, [(0, start_y)]))
         
-        # Real cracks spanning across structural components will have an expanded bounding length
-        if max_dim >= 20:
-            crack_indicators_count += 1
-            cv2.rectangle(output_display, (x - 2, y - 2), (x + w + 2, y + h + 2), (0, 0, 255), 2)
-            cv2.putText(output_display, "VECTOR DEFECT", (x, y - 6), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1)
+        visited = np.zeros_like(cost_grid, dtype=bool)
+        visited[start_y, 0] = True
+        
+        while not pq.empty():
+            current_cost, x, y, path = pq.get()
+            
+            # Reach the opposite side of the strut window
+            if x == W - 1:
+                return path, current_cost
+                
+            # Check 8-way directional movement neighbors
+            for dx, dy in [(1,0), (1,1), (1,-1), (0,1), (0,-1)]:
+                nx, ny = x + dx, y + dy
+                if 0 <= nx < W and 0 <= ny < H:
+                    if not visited[ny, nx]:
+                        visited[ny, nx] = True
+                        step_cost = int(cost_grid[ny, nx])
+                        # If a diagnostic path cuts diagonally, give it a tiny buffer favor
+                        if dx != 0 and dy != 0:
+                            step_cost = int(step_cost * 1.4)
+                        pq.put((current_cost + step_cost, nx, ny, path + [(nx, ny)]))
+        return None, float('inf')
 
-    # UI Assessment Display
-    status = f"🔴 FAIL ({crack_indicators_count} Aligned Fractures Isolated)" if crack_indicators_count > 0 else "🟢 PASS"
-    st.markdown(f"### Inspection Assessment: {status}")
+    # Step through the image rows horizontally to spot where paths naturally converge into the crack channel
+    all_paths = []
+    costs = []
     
-    col1, col2 = st.columns(2)
-    with col1:
-        st.image(orig_img, channels="BGR", caption="Input Multi-Layer Image", use_container_width=True)
-    with col2:
-        st.image(output_display, channels="BGR", caption="Isolated Linear Anomalies (Red Boxes)", use_container_width=True)
+    for y_start in range(10, H - 10, scan_spacing):
+        path, final_cost = find_leak_path(cost_map, y_start, y_start)
+        if path:
+            all_paths.append(path)
+            costs.append(final_cost)
+            
+    if costs:
+        # The true crack path represents the global minimum path resistance across the entire sample window
+        min_cost = min(costs)
+        avg_cost = np.mean(costs)
         
-    # Multi-Layer Diagnostics
-    with st.expander("Show Directional Vector Diagnostic Maps"):
-        col3, col4 = st.columns(2)
-        with col3:
-            st.image(enhanced_response, caption="Gabor Filter Output (Isolates Aligned Waves)", use_container_width=True)
-        with col4:
-            st.image(linked_cracks, caption="Binarized Linear Wave Patterns", use_container_width=True)
+        # A structural breach creates a massive drop in traversal cost compared to healthy sections
+        for path, path_cost in zip(all_paths, costs):
+            # If this path configuration bypasses the 'mountain' with lower relative resistance, draw it
+            if path_cost < avg_cost * 0.75:
+                for idx in range(len(path) - 1):
+                    cv2.line(crack_overlay, path[idx], path[idx+1], (0, 0, 255), 2)
+                    cv2.line(shortcut_map, path[idx], path[idx+1], 255, 2)
+                    
+    # Display Output Results
+    st.image(crack_overlay, channels="BGR", caption="Least Resistance Flow-Line (Forced Crack Path Tracking)", use_container_width=True)
+    
+    with st.expander("Show Resistance Cost Map Diagnostics"):
+        col1, col2 = st.columns(2)
+        with col1:
+            st.image(cost_map, caption="Terrain Cost Map (Dark Valleys = Easy Paths)", use_container_width=True)
+        with col2:
+            st.image(shortcut_map, caption="Isolated Path Convergence Vector", use_container_width=True)
 else:
-    st.info("Upload your multi-layered sample image to execute anisotropic frequency filtering.")
+    st.info("Upload your multi-layered sponge sample view to track the structural shortcut paths.")
