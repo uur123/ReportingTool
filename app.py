@@ -43,7 +43,7 @@ if uploaded_file is not None:
     
     gray = cv2.cvtColor(orig_img, cv2.COLOR_BGR2GRAY)
     
-    # Step 1: Calculate localized focus map using the Laplacian Operator (evaluates micro-edge sharpness)
+    # Step 1: Calculate localized focus map using the Laplacian Operator
     laplacian_map = cv2.Laplacian(gray, cv2.CV_64F, ksize=3)
     laplacian_variance = np.abs(laplacian_map)
     
@@ -55,10 +55,9 @@ if uploaded_file is not None:
     main_layer_mask = main_layer_mask.astype(np.uint8)
     
     # Step 2: Extract Heights ONLY from the isolated Main Layer
-    # Map pixels to physical heights
     height_map = (gray.astype(np.float32) / 255.0) * intensity_scaling
     
-    # Extract height array values where the main layer mask is active (removes 2D structure bias)
+    # Extract height array values where the main layer mask is active
     foreground_heights = height_map[main_layer_mask == 255]
     
     if len(foreground_heights) > 0:
@@ -68,7 +67,6 @@ if uploaded_file is not None:
         fg_sq = np.sqrt(np.mean((foreground_heights - fg_mu) ** 2))
         
         # Step 4: Visual Generation
-        # Build an extraction check map showing the isolated main layer inside your image
         main_layer_view = orig_img.copy()
         # Dim out the background layers to visually prove extraction isolation
         main_layer_view[main_layer_mask == 0] = (main_layer_view[main_layer_mask == 0] * 0.25).astype(np.uint8)
@@ -77,20 +75,23 @@ if uploaded_file is not None:
         fg_height_display = np.zeros_like(height_map)
         fg_height_display[main_layer_mask == 255] = height_map[main_layer_mask == 255]
         
-        # FIX: Normalize strictly to integer 0-255 format before applying colormap
-        fg_height_display_normalized = cv2.normalize(fg_height_display, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-        heatmap = cv2.applyColorMap(fg_height_display_normalized, cv2.COLORMAP_JET)
+        # Explicitly normalize and cast to 8-bit integer format (0-255 range)
+        fg_height_display_normalized = cv2.normalize(fg_height_display, None, 0, 255, cv2.NORM_MINMAX)
+        fg_height_display_int = np.uint8(fg_height_display_normalized)
+        
+        heatmap = cv2.applyColorMap(fg_height_display_int, cv2.COLORMAP_JET)
         heatmap[main_layer_mask == 0] = 0 # Zero out background spaces in heatmap view
         
-        # FIX FOR RAW DIAGNOSTIC VIEWS: Normalize float maps to standard 0-255 image format
-        focus_blurred_display = cv2.normalize(focus_blurred, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+        # Explicitly convert the diagnostic focus map to integer layout to prevent Streamlit error
+        focus_blurred_normalized = cv2.normalize(focus_blurred, None, 0, 255, cv2.NORM_MINMAX)
+        focus_blurred_display = np.uint8(focus_blurred_normalized)
         
         # --- RENDER RESULTS PANEL ---
         col1, col2 = st.columns(2)
         with col1:
-            st.image(main_layer_view, channels="BGR", caption="Isolated Main Layer (Highlighted Surface)", use_container_width=True)
+            st.image(main_layer_view, channels="BGR", caption="Isolated Main Layer (Highlighted Surface)", width="stretch")
         with col2:
-            st.image(heatmap, channels="BGR", caption="Main Layer Topography Heatmap", use_container_width=True)
+            st.image(heatmap, channels="BGR", caption="Main Layer Topography Heatmap", width="stretch")
             
         st.subheader("📊 Foreground Roughness Calculations")
         c1, c2, c3 = st.columns(3)
@@ -118,6 +119,6 @@ if uploaded_file is not None:
         
     # Extra inspection views
     with st.expander("Show Computer Vision Depth Extraction Map"):
-        st.image(focus_blurred_display, caption="Raw Local Edge Contrast Energy (Whiter = Closer to Camera)", use_container_width=True)
+        st.image(focus_blurred_display, caption="Raw Local Edge Contrast Energy (Whiter = Closer to Camera)", width="stretch")
 else:
     st.info("Upload your multi-layered sample view to run foreground layer segregation.")
