@@ -47,7 +47,7 @@ if uploaded_file is not None:
     blurred = cv2.bilateralFilter(gray, 9, 75, 75)
     
     # Step 2: Use Sobel derivative to find sharp horizontal transitions (Vertical changes)
-    # This specifically target lines slicing across the struts
+    # This specifically targets lines slicing across the struts
     sobel_y = cv2.Sobel(blurred, cv2.CV_64F, 0, 1, ksize=3)
     sobel_y = np.abs(sobel_y)
     sobel_y = np.uint8(np.clip(sobel_y, 0, 255))
@@ -98,7 +98,7 @@ if uploaded_file is not None:
     col1, col2 = st.columns(2)
     with col1:
         st.image(orig_img, channels="BGR", caption="Input Sponge View", use_container_width=True)
-    with cv2.columns(1)[0] if 'cv2' in globals() else col2: # Just ensuring clean rendering
+    with col2:
         st.image(output_display, channels="BGR", caption="Detected Crack Locations (Red Boxes)", use_container_width=True)
         
     # Micro Diagnostic Views for Tuning
