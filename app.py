@@ -5,25 +5,24 @@ from streamlit_cropper import st_cropper
 from PIL import Image
 
 # Page configuration
-st.set_page_config(page_title="Porous Surface Roughness Analyzer", layout="centered")
+st.set_page_config(page_title="Foreground Roughness Analyzer", layout="centered")
 
-st.title("📊 Porous Material Surface Roughness Analyzer")
-st.write("Maps and quantifies localized surface roughness variations across complex multi-layered porous structures.")
+st.title("🔬 Foreground Layer Surface Roughness Analyzer")
+st.write("Isolates the crisp main foreground layer and computes roughness metrics exclusively on it, ignoring blurry deeper layers.")
 
 # Sidebar Controls
-st.sidebar.header("Roughness Calculation Settings")
+st.sidebar.header("Foreground Layer Selection")
 
-window_size = st.sidebar.slider(
-    "Local Texture Window Size", 
+focus_threshold = st.sidebar.slider(
+    "Sharpness Threshold (Focus Filter)", 
     min_value=5, 
-    max_value=51, 
-    value=15, 
-    step=2,
-    help="The pixel neighborhood size used to evaluate texture roughness. Smaller windows catch micro-roughness."
+    max_value=150, 
+    value=35,
+    help="Higher values select only the absolute crispest foreground surfaces. Lower values allow slightly deeper struts to blend in."
 )
 
 intensity_scaling = st.sidebar.slider(
-    "Z-Axis Max Calibration Value (µm)", 
+    "Z-Axis Max Scale Calibration (µm)", 
     min_value=1.0, 
     max_value=500.0, 
     value=100.0,
@@ -39,73 +38,81 @@ if uploaded_file is not None:
     cropped_pil = st_cropper(pil_image, realtime_update=True, box_color='#FF0000', aspect_ratio=None)
     orig_img = cv2.cvtColor(np.array(cropped_pil), cv2.COLOR_RGB2BGR)
     
-    # --- ROUGHNESS CALCULATION PIPELINE ---
-    st.subheader("2. Surface Topography & Texture Analysis")
+    # --- FOREGROUND ISOLATION PIPELINE ---
+    st.subheader("2. Foreground Segregation & Roughness Analysis")
     
     gray = cv2.cvtColor(orig_img, cv2.COLOR_BGR2GRAY)
     
-    # Convert grayscale values into a pseudo-height map matrix (scaled to physical microns)
+    # Step 1: Calculate localized focus map using the Laplacian Operator (evaluates micro-edge sharpness)
+    laplacian_map = cv2.Laplacian(gray, cv2.CV_64F, ksize=3)
+    laplacian_variance = np.abs(laplacian_map)
+    
+    # Smooth the sharpness map to create uniform solid regions for the foreground struts
+    focus_blurred = cv2.GaussianBlur(laplacian_variance, (11, 11), 0)
+    
+    # Create the Main Layer Mask (White = Main Layer, Black = Everything else)
+    _, main_layer_mask = cv2.threshold(focus_blurred, focus_threshold, 255, cv2.THRESH_BINARY)
+    main_layer_mask = main_layer_mask.astype(np.uint8)
+    
+    # Step 2: Extract Heights ONLY from the isolated Main Layer
+    # Map pixels to physical heights
     height_map = (gray.astype(np.float32) / 255.0) * intensity_scaling
     
-    # Calculate global statistical benchmarks
-    global_mu = np.mean(height_map)
-    global_sa = np.mean(np.abs(height_map - global_mu))
-    global_sq = np.sqrt(np.mean((height_map - global_mu) ** 2))
+    # Extract height array values where the main layer mask is active (removes 2D structure bias)
+    foreground_heights = height_map[main_layer_mask == 255]
     
-    # --- LOCALIZED ROUGHNESS MAPPING (Sliding Window RMS) ---
-    # We use a moving standard deviation filter to map texture variation
-    mean_kernel = np.ones((window_size, window_size), np.float32) / (window_size ** 2)
-    local_mean = cv2.filter2D(height_map, -1, mean_kernel)
-    local_sq_mean = cv2.filter2D(height_map ** 2, -1, mean_kernel)
-    
-    # Local Variance = E[X^2] - (E[X])^2
-    local_variance = local_sq_mean - (local_mean ** 2)
-    local_variance = np.clip(local_variance, 0, None) # Erase minor floating-point math artifacts
-    local_sq_map = np.sqrt(local_variance) # Local Sq (Root Mean Square Roughness) Map
-    
-    # Normalize local roughness for heatmap generation
-    roughness_normalized = cv2.normalize(local_sq_map, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-    heatmap = cv2.applyColorMap(roughness_normalized, cv2.COLORMAP_JET)
-    
-    # Identify localized areas with abnormal roughness spikes (e.g., shattered struts or cracks)
-    roughness_cutoff = global_sq * 1.5
-    anomaly_mask = np.uint8(local_sq_map > roughness_cutoff) * 255
-    
-    # Generate overlay view
-    overlay_display = orig_img.copy()
-    overlay_display[anomaly_mask == 255] = [0, 0, 255] # Highlight highly irregular surfaces in solid Red
-    
-    # --- RENDER RESULTS PANEL ---
-    col1, col2 = st.columns(2)
-    with col1:
-        st.image(orig_img, channels="BGR", caption="Selected Material Surface", use_container_width=True)
-    with col2:
-        st.image(heatmap, channels="BGR", caption="Roughness Heatmap (Blue=Smooth, Red=Rough)", use_container_width=True)
+    if len(foreground_heights) > 0:
+        # Step 3: Compute Roughness parameters on the isolated foreground data array
+        fg_mu = np.mean(foreground_heights)
+        fg_sa = np.mean(np.abs(foreground_heights - fg_mu))
+        fg_sq = np.sqrt(np.mean((foreground_heights - fg_mu) ** 2))
         
-    st.subheader("📊 Quantitative Surface Profile Data")
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.metric(
-            label="Global Arithmetic Roughness (Sa)", 
-            value=f"{global_sa:.2f} µm",
-            help="Average absolute height deviation across the entire selected region."
-        )
-    with c2:
-        st.metric(
-            label="Global Root Mean Square Roughness (Sq)", 
-            value=f"{global_sq:.2f} µm",
-            help="Standard deviation of height profile. Highly responsive to extreme texture anomalies."
-        )
-    with c3:
-        anomaly_area_pct = (np.count_nonzero(anomaly_mask) / anomaly_mask.size) * 100
-        st.metric(
-            label="Surface Texture Irregularity Area", 
-            value=f"{anomaly_area_pct:.1f} %",
-            help="Percentage of the scanned area showing a localized roughness score significantly higher than the baseline average."
-        )
+        # Step 4: Visual Generation
+        # Build an extraction check map showing the isolated main layer inside your image
+        main_layer_view = orig_img.copy()
+        # Dim out the background layers to visually prove extraction isolation
+        main_layer_view[main_layer_mask == 0] = (main_layer_view[main_layer_mask == 0] * 0.25).astype(np.uint8)
         
-    with st.expander("Show Structural Roughness Breakdown"):
-        st.image(overlay_display, channels="BGR", caption="Roughness Spike Locations (Marked in Red)", use_container_width=True)
-        st.write("💡 *Interpretation:* In a healthy porous network, the roughness heatmap should remain fairly uniform. A clear linear red cluster passing through a strut wall indicates a macro structural anomaly or fracture path.")
+        # Build a true foreground-only height map for display visualization
+        fg_height_display = np.zeros_like(height_map)
+        fg_height_display[main_layer_mask == 255] = height_map[main_layer_mask == 255]
+        fg_height_display_normalized = cv2.normalize(fg_height_display, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+        heatmap = cv2.applyColorMap(fg_height_display_normalized, cv2.COLORMAP_JET)
+        heatmap[main_layer_mask == 0] = 0 # Zero out background spaces in heatmap view
+        
+        # --- RENDER RESULTS PANEL ---
+        col1, col2 = st.columns(2)
+        with col1:
+            st.image(main_layer_view, channels="BGR", caption="Isolated Main Layer (Highlighted Surface)", use_container_width=True)
+        with col2:
+            st.image(heatmap, channels="BGR", caption="Main Layer Topography Heatmap", use_container_width=True)
+            
+        st.subheader("📊 Foreground Roughness Calculations")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.metric(
+                label="Main Layer Roughness (Sa)", 
+                value=f"{fg_sa:.2f} µm",
+                help="Arithmetic mean height deviation restricted to the top in-focus strut surface."
+            )
+        with c2:
+            st.metric(
+                label="Main Layer Roughness (Sq)", 
+                value=f"{fg_sq:.2f} µm",
+                help="Root mean square height deviation restricted to the top in-focus strut surface."
+            )
+        with c3:
+            surface_coverage = (np.count_nonzero(main_layer_mask) / main_layer_mask.size) * 100
+            st.metric(
+                label="Main Layer Density Space", 
+                value=f"{surface_coverage:.1f} %",
+                help="Percentage of image area occupied by the topmost physical sponge layer."
+            )
+    else:
+        st.error("No foreground structural content isolated. Please lower the 'Sharpness Threshold' slider in the sidebar.")
+        
+    # Extra inspection views
+    with st.expander("Show Computer Vision Depth Extraction Map"):
+        st.image(focus_blurred, caption="Raw Local Edge Contrast Energy (Whiter = Closer to Camera)", use_container_width=True)
 else:
-    st.info("Upload your multi-layered sample image to generate quantitative surface roughness statistics.")
+    st.info("Upload your multi-layered sample view to run foreground layer segregation.")
