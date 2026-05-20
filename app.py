@@ -76,9 +76,14 @@ if uploaded_file is not None:
         # Build a true foreground-only height map for display visualization
         fg_height_display = np.zeros_like(height_map)
         fg_height_display[main_layer_mask == 255] = height_map[main_layer_mask == 255]
+        
+        # FIX: Normalize strictly to integer 0-255 format before applying colormap
         fg_height_display_normalized = cv2.normalize(fg_height_display, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
         heatmap = cv2.applyColorMap(fg_height_display_normalized, cv2.COLORMAP_JET)
         heatmap[main_layer_mask == 0] = 0 # Zero out background spaces in heatmap view
+        
+        # FIX FOR RAW DIAGNOSTIC VIEWS: Normalize float maps to standard 0-255 image format
+        focus_blurred_display = cv2.normalize(focus_blurred, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
         
         # --- RENDER RESULTS PANEL ---
         col1, col2 = st.columns(2)
@@ -113,6 +118,6 @@ if uploaded_file is not None:
         
     # Extra inspection views
     with st.expander("Show Computer Vision Depth Extraction Map"):
-        st.image(focus_blurred, caption="Raw Local Edge Contrast Energy (Whiter = Closer to Camera)", use_container_width=True)
+        st.image(focus_blurred_display, caption="Raw Local Edge Contrast Energy (Whiter = Closer to Camera)", use_container_width=True)
 else:
     st.info("Upload your multi-layered sample view to run foreground layer segregation.")
