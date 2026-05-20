@@ -2,3 +2,6 @@ streamlit
 pandas
 pillow
 fpdf2
+streamlit
+numpy
+opencv-python-headless
