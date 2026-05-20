@@ -3,116 +3,109 @@ import numpy as np
 import cv2
 from streamlit_cropper import st_cropper
 from PIL import Image
-import queue
 
 # Page configuration
-st.set_page_config(page_title="Pathfinding Crack Tracker", layout="centered")
+st.set_page_config(page_title="Porous Surface Roughness Analyzer", layout="centered")
 
-st.title("🧽 Pathfinding Flow-Field Crack Tracker")
-st.write("Tracks fractures by treating the strut as a structural wall and searching for low-resistance path shortcuts cutting across it.")
+st.title("📊 Porous Material Surface Roughness Analyzer")
+st.write("Maps and quantifies localized surface roughness variations across complex multi-layered porous structures.")
 
-# Sidebar Settings
-st.sidebar.header("Pathfinding Mechanics")
+# Sidebar Controls
+st.sidebar.header("Roughness Calculation Settings")
 
-wall_density = st.sidebar.slider(
-    "Strut Solid Resistance", 
-    min_value=10, 
-    max_value=250, 
-    value=180,
-    help="Determines how hard the solid material resists path crossing. Higher values focus tracking inside tight cuts."
-)
-
-scan_spacing = st.sidebar.slider(
-    "Scan Step Density (Pixels)", 
+window_size = st.sidebar.slider(
+    "Local Texture Window Size", 
     min_value=5, 
-    max_value=50, 
-    value=20,
-    help="Controls how many entry/exit checkpoint paths are cross-checked over the material surface."
+    max_value=51, 
+    value=15, 
+    step=2,
+    help="The pixel neighborhood size used to evaluate texture roughness. Smaller windows catch micro-roughness."
 )
 
-uploaded_file = st.file_uploader("Upload sponge surface image...", type=["jpg", "jpeg", "png", "bmp", "tiff"])
+intensity_scaling = st.sidebar.slider(
+    "Z-Axis Max Calibration Value (µm)", 
+    min_value=1.0, 
+    max_value=500.0, 
+    value=100.0,
+    help="Maps the maximum pixel intensity change to a physical depth scale in micrometers."
+)
+
+uploaded_file = st.file_uploader("Upload material image...", type=["jpg", "jpeg", "png", "bmp", "tiff"])
 
 if uploaded_file is not None:
     pil_image = Image.open(uploaded_file)
     
-    st.subheader("1. Crop the Active Fracture Zone")
+    st.subheader("1. Define Target Evaluation Region")
     cropped_pil = st_cropper(pil_image, realtime_update=True, box_color='#FF0000', aspect_ratio=None)
     orig_img = cv2.cvtColor(np.array(cropped_pil), cv2.COLOR_RGB2BGR)
     
-    st.subheader("2. Tracked Failure Flow-Path")
+    # --- ROUGHNESS CALCULATION PIPELINE ---
+    st.subheader("2. Surface Topography & Texture Analysis")
     
     gray = cv2.cvtColor(orig_img, cv2.COLOR_BGR2GRAY)
-    # Apply a heavy bilateral filter to erase the texture patterns of lower layers while keeping the foreground strut edges crisp
-    smoothed = cv2.bilateralFilter(gray, 15, 80, 80)
     
-    # Generate a Cost Map: Brighter strut pixels have high cost. Dark crack pixels have low cost.
-    # We invert the grayscale so that the background/strut becomes a high-cost mountain ridge
-    cost_map = np.uint8(np.clip(smoothed.astype(np.int32) * (wall_density / 255.0), 1, 255))
+    # Convert grayscale values into a pseudo-height map matrix (scaled to physical microns)
+    height_map = (gray.astype(np.float32) / 255.0) * intensity_scaling
     
-    H, W = cost_map.shape
-    crack_overlay = orig_img.copy()
-    shortcut_map = np.zeros_like(gray)
+    # Calculate global statistical benchmarks
+    global_mu = np.mean(height_map)
+    global_sa = np.mean(np.abs(height_map - global_mu))
+    global_sq = np.sqrt(np.mean((height_map - global_mu) ** 2))
     
-    # Dijkstra/A* Pathfinding implementation tailored to find the path of least resistance across the columns
-    def find_leak_path(cost_grid, start_y, end_y):
-        # priority queue stores: (total_cost, current_x, current_y, path_history)
-        pq = queue.PriorityQueue()
-        pq.put((int(cost_grid[start_y, 0]), 0, start_y, [(0, start_y)]))
+    # --- LOCALIZED ROUGHNESS MAPPING (Sliding Window RMS) ---
+    # We use a moving standard deviation filter to map texture variation
+    mean_kernel = np.ones((window_size, window_size), np.float32) / (window_size ** 2)
+    local_mean = cv2.filter2D(height_map, -1, mean_kernel)
+    local_sq_mean = cv2.filter2D(height_map ** 2, -1, mean_kernel)
+    
+    # Local Variance = E[X^2] - (E[X])^2
+    local_variance = local_sq_mean - (local_mean ** 2)
+    local_variance = np.clip(local_variance, 0, None) # Erase minor floating-point math artifacts
+    local_sq_map = np.sqrt(local_variance) # Local Sq (Root Mean Square Roughness) Map
+    
+    # Normalize local roughness for heatmap generation
+    roughness_normalized = cv2.normalize(local_sq_map, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+    heatmap = cv2.applyColorMap(roughness_normalized, cv2.COLORMAP_JET)
+    
+    # Identify localized areas with abnormal roughness spikes (e.g., shattered struts or cracks)
+    roughness_cutoff = global_sq * 1.5
+    anomaly_mask = np.uint8(local_sq_map > roughness_cutoff) * 255
+    
+    # Generate overlay view
+    overlay_display = orig_img.copy()
+    overlay_display[anomaly_mask == 255] = [0, 0, 255] # Highlight highly irregular surfaces in solid Red
+    
+    # --- RENDER RESULTS PANEL ---
+    col1, col2 = st.columns(2)
+    with col1:
+        st.image(orig_img, channels="BGR", caption="Selected Material Surface", use_container_width=True)
+    with col2:
+        st.image(heatmap, channels="BGR", caption="Roughness Heatmap (Blue=Smooth, Red=Rough)", use_container_width=True)
         
-        visited = np.zeros_like(cost_grid, dtype=bool)
-        visited[start_y, 0] = True
+    st.subheader("📊 Quantitative Surface Profile Data")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.metric(
+            label="Global Arithmetic Roughness (Sa)", 
+            value=f"{global_sa:.2f} µm",
+            help="Average absolute height deviation across the entire selected region."
+        )
+    with c2:
+        st.metric(
+            label="Global Root Mean Square Roughness (Sq)", 
+            value=f"{global_sq:.2f} µm",
+            help="Standard deviation of height profile. Highly responsive to extreme texture anomalies."
+        )
+    with c3:
+        anomaly_area_pct = (np.count_nonzero(anomaly_mask) / anomaly_mask.size) * 100
+        st.metric(
+            label="Surface Texture Irregularity Area", 
+            value=f"{anomaly_area_pct:.1f} %",
+            help="Percentage of the scanned area showing a localized roughness score significantly higher than the baseline average."
+        )
         
-        while not pq.empty():
-            current_cost, x, y, path = pq.get()
-            
-            # Reach the opposite side of the strut window
-            if x == W - 1:
-                return path, current_cost
-                
-            # Check 8-way directional movement neighbors
-            for dx, dy in [(1,0), (1,1), (1,-1), (0,1), (0,-1)]:
-                nx, ny = x + dx, y + dy
-                if 0 <= nx < W and 0 <= ny < H:
-                    if not visited[ny, nx]:
-                        visited[ny, nx] = True
-                        step_cost = int(cost_grid[ny, nx])
-                        # If a diagnostic path cuts diagonally, give it a tiny buffer favor
-                        if dx != 0 and dy != 0:
-                            step_cost = int(step_cost * 1.4)
-                        pq.put((current_cost + step_cost, nx, ny, path + [(nx, ny)]))
-        return None, float('inf')
-
-    # Step through the image rows horizontally to spot where paths naturally converge into the crack channel
-    all_paths = []
-    costs = []
-    
-    for y_start in range(10, H - 10, scan_spacing):
-        path, final_cost = find_leak_path(cost_map, y_start, y_start)
-        if path:
-            all_paths.append(path)
-            costs.append(final_cost)
-            
-    if costs:
-        # The true crack path represents the global minimum path resistance across the entire sample window
-        min_cost = min(costs)
-        avg_cost = np.mean(costs)
-        
-        # A structural breach creates a massive drop in traversal cost compared to healthy sections
-        for path, path_cost in zip(all_paths, costs):
-            # If this path configuration bypasses the 'mountain' with lower relative resistance, draw it
-            if path_cost < avg_cost * 0.75:
-                for idx in range(len(path) - 1):
-                    cv2.line(crack_overlay, path[idx], path[idx+1], (0, 0, 255), 2)
-                    cv2.line(shortcut_map, path[idx], path[idx+1], 255, 2)
-                    
-    # Display Output Results
-    st.image(crack_overlay, channels="BGR", caption="Least Resistance Flow-Line (Forced Crack Path Tracking)", use_container_width=True)
-    
-    with st.expander("Show Resistance Cost Map Diagnostics"):
-        col1, col2 = st.columns(2)
-        with col1:
-            st.image(cost_map, caption="Terrain Cost Map (Dark Valleys = Easy Paths)", use_container_width=True)
-        with col2:
-            st.image(shortcut_map, caption="Isolated Path Convergence Vector", use_container_width=True)
+    with st.expander("Show Structural Roughness Breakdown"):
+        st.image(overlay_display, channels="BGR", caption="Roughness Spike Locations (Marked in Red)", use_container_width=True)
+        st.write("💡 *Interpretation:* In a healthy porous network, the roughness heatmap should remain fairly uniform. A clear linear red cluster passing through a strut wall indicates a macro structural anomaly or fracture path.")
 else:
-    st.info("Upload your multi-layered sponge sample view to track the structural shortcut paths.")
+    st.info("Upload your multi-layered sample image to generate quantitative surface roughness statistics.")
