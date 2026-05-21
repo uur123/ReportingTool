@@ -85,7 +85,7 @@ def detect_cracks(image, threshold=80, pore_mask=None):
     # 3. Use Hessian Matrix Eigenvalues to find thin line valleys (ridges) instead of Canny edges
     # This prevents catching boundaries and looks for thin, linear dark structures
     hxx, hxy, hyy = hessian_matrix(image, sigma=1.5)
-    i1, i2 = hessian_matrix_eigvals(hxx, hxy, hyy)
+    i1, i2 = hessian_matrix_eigvals([hxx, hxy, hyy])
     
     # i1 represents the maximal local curvature. Cracks show up as strong positive/negative peaks.
     # We look for dark line structures on a lighter strut background
