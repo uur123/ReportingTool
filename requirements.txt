@@ -1,5 +1,5 @@
 streamlit
-opencv-python
+
 numpy
 pandas
 matplotlib
@@ -7,3 +7,4 @@ scikit-image
 scipy
 plotly
 Pillow
+opencv-python-headless
