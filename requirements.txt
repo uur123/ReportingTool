@@ -8,3 +8,15 @@ scipy
 plotly
 Pillow
 opencv-python-headless==4.10.0.84
+
+streamlit
+
+numpy
+pandas
+matplotlib
+scikit-image
+scipy
+plotly
+Pillow
+networkx
+scikit-learn
