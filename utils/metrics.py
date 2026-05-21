@@ -1,8 +1,20 @@
-import pandas as pd
 
+def structural_weakness_index(
+    porosity,
+    crack_density,
+    avg_crack_length
+):
 
-def compare_samples(results):
+    alpha = 0.5
+    beta = 10000
+    gamma = 0.05
 
-    df = pd.DataFrame(results)
+    swi = (
+        alpha * porosity
+        +
+        beta * crack_density
+        +
+        gamma * avg_crack_length
+    )
 
-    return df
+    return round(swi, 3)
