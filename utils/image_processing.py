@@ -1,11 +1,8 @@
 import cv2
 import numpy as np
-
 from scipy.ndimage import distance_transform_edt
 from skimage import measure
 from skimage.morphology import skeletonize
-from skimage.feature import hessian_matrix, hessian_matrix_eigvals
-
 
 def preprocess_image(image, blur_size=5):
     if blur_size % 2 == 0:
@@ -16,13 +13,11 @@ def preprocess_image(image, blur_size=5):
     img = clahe.apply(img)
     return img
 
-
 def segment_pores(image, threshold=120):
     _, mask = cv2.threshold(image, threshold, 255, cv2.THRESH_BINARY_INV)
     kernel = np.ones((3, 3), np.uint8)
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
     return mask
-
 
 def calculate_porosity(mask):
     pore_pixels = np.sum(mask > 0)
@@ -31,17 +26,44 @@ def calculate_porosity(mask):
         return 0.0
     return round((pore_pixels / total_pixels) * 100, 2)
 
-
 def pore_analysis(mask):
+    """
+    Analyzes pores and filters out broken, unclosed, or jagged shapes.
+    Only counts round or cleanly oval ones using circularity constraints.
+    """
     labels = measure.label(mask)
     props = measure.regionprops(labels)
-    areas = []
+    
+    validated_areas = []
+    cleaned_pore_mask = np.zeros_like(mask)
+    
     for prop in props:
-        if prop.area > 10:
-            areas.append(prop.area)
-    mean_area = np.mean(areas) if len(areas) > 0 else 0
-    return {"areas": areas, "mean_area": mean_area, "count": len(areas)}
+        if prop.area < 15:
+            continue
+            
+        # Calculate Circularity Metric = (4 * pi * Area) / (Perimeter^2)
+        # Perfect circle = 1.0, Jagged or broken shapes approach 0.0
+        perimeter = prop.perimeter
+        if perimeter == 0:
+            continue
+            
+        circularity = (4 * np.pi * prop.area) / (perimeter ** 2)
+        
+        # Keep only round/oval closed pores (reject broken/half-opened boundaries)
+        if circularity >= 0.65:
+            validated_areas.append(prop.area)
+            for coord in prop.coords:
+                cleaned_pore_mask[coord[0], coord[1]] = 255
 
+    # Dynamically update the mask array content in-place to affect subsequent steps
+    mask[:] = cleaned_pore_mask
+
+    mean_area = np.mean(validated_areas) if len(validated_areas) > 0 else 0
+    return {
+        "areas": validated_areas,
+        "mean_area": mean_area,
+        "count": len(validated_areas)
+    }
 
 def detect_cracks(
     image, 
@@ -52,116 +74,65 @@ def detect_cracks(
     crack_polarity="Dark Cracks",
     crack_sigma=1.0,
     min_eccentricity=0.75,
-    min_crack_size=3,
-    top_layer_focus=True,
-    focus_sensitivity=15
+    min_crack_size=3
 ):
     """
-    Advanced Hessian-based crack detector with an automated 
-    focal layer isolator for 3D sponge/foam strut networks.
+    Finds cracks based on topological connectivity instead of just pixel brightness.
+    Traces paths propagating through struts starting from validated pores.
     """
-    # 1. OPTIONAL: Isolate only the sharp, top-surface layer of the sponge
-    if top_layer_focus:
-        # Calculate local texture sharpness via a morphological range filter
-        kernel_focus = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
-        local_max = cv2.dilate(image, kernel_focus)
-        local_min = cv2.erode(image, kernel_focus)
-        local_variance = cv2.absdiff(local_max, local_min)
-        
-        # Binary mask holding ONLY the sharp top-surface struts
-        _, sharp_surface_mask = cv2.threshold(local_variance, focus_sensitivity, 255, cv2.THRESH_BINARY)
-        
-        # Smooth the surface mask to fill internal strut gaps
-        kernel_clean = np.ones((5, 5), np.uint8)
-        sharp_surface_mask = cv2.morphologyEx(sharp_surface_mask, cv2.MORPH_CLOSE, kernel_clean)
-    else:
-        sharp_surface_mask = np.ones_like(image) * 255
-
-    # 2. Extract the general Strut Phase
+    # 1. Isolate the Solid Struts
     strut_flags = cv2.THRESH_BINARY_INV if strut_invert else cv2.THRESH_BINARY
     _, strut_mask = cv2.threshold(image, strut_threshold, 255, strut_flags)
     
-    # Restrict the strut mask strictly to the sharp top layer
-    top_struts = cv2.bitwise_and(strut_mask, sharp_surface_mask)
-    
-    # 3. Clean and isolate the core body of the top struts
+    # Clean up the strut mask
     if pore_mask is not None:
-        strut_body = cv2.bitwise_and(top_struts, cv2.bitwise_not(pore_mask))
+        strut_body = cv2.bitwise_and(strut_mask, cv2.bitwise_not(pore_mask))
     else:
-        strut_body = top_struts.copy()
-        
-    # Erode edges to ensure boundary lines aren't caught as cracks
-    kernel_erode = np.ones((3, 3), np.uint8)
-    safe_strut_zone = cv2.erode(strut_body, kernel_erode, iterations=1)
+        strut_body = strut_mask.copy()
 
-    # 4. Extract Line Structures using Hessian Matrices
-    hxx, hxy, hyy = hessian_matrix(image, sigma=crack_sigma)
-    i1, i2 = hessian_matrix_eigvals([hxx, hxy, hyy])
+    # 2. Adaptive Local Valley Tracing (Dynamic Range Profiling)
+    # This acts as an edge-independent profile tracer
+    kernel_size = int(max(3, 2 * round(crack_sigma) + 1))
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kernel_size, kernel_size))
     
     if crack_polarity == "Dark Cracks":
-        raw_intensity = i1  
+        # Black hat extraction captures narrow lines darker than surroundings
+        topological_lines = cv2.morphologyEx(image, cv2.MORPH_BLACKHAT, kernel)
     else:
-        raw_intensity = -i2 
+        # Top hat extraction captures narrow lines brighter than surroundings
+        topological_lines = cv2.morphologyEx(image, cv2.MORPH_TOPHAT, kernel)
+        
+    # Apply a local adaptive threshold over the structural valley tracing
+    _, trace_mask = cv2.threshold(topological_lines, int(threshold * 0.3), 255, cv2.THRESH_BINARY)
+    trace_mask = cv2.bitwise_and(trace_mask, strut_body)
 
-    hessian_cutoff = threshold / 50.0
-    ridge_map = np.where(raw_intensity > hessian_cutoff, 255, 0).astype(np.uint8)
-
-    # 5. Mask out all ridges that fall outside the top surface zone
-    valid_cracks = cv2.bitwise_and(ridge_map, safe_strut_zone)
-
-    # 6. Geometrical Filter
-    labeled_cracks = measure.label(valid_cracks > 0)
-    props = measure.regionprops(labeled_cracks)
-    
-    final_crack_mask = np.zeros_like(valid_cracks)
-    for prop in props:
-        if prop.area < min_crack_size: 
-            continue
-            
-        if prop.eccentricity >= min_eccentricity:
+    # 3. Connectivity Verification Logic: Connect to Validated Pores
+    if pore_mask is not None and np.any(pore_mask > 0):
+        # Dilate the round pores slightly to create an intersection hit-zone
+        pore_zones = cv2.dilate(pore_mask, np.ones((5, 5), np.uint8), iterations=1)
+        
+        # Label every line segment found by our trace mask
+        labeled_lines = measure.label(trace_mask > 0)
+        props = measure.regionprops(labeled_lines)
+        
+        final_crack_mask = np.zeros_like(trace_mask)
+        
+        for prop in props:
+            if prop.area < min_crack_size:
+                continue
+                
+            # Create a single-element temporary validation mask
+            single_line_mask = np.zeros_like(trace_mask)
             for coord in prop.coords:
-                final_crack_mask[coord, coord] = 255
+                single_line_mask[coord[0], coord[1]] = 255
+                
+            # Check if this specific structural line physically touches a pore boundary hit-zone
+            touches_pore = cv2.bitwise_and(single_line_mask, pore_zones)
+            
+            # CRACK CONDITION: Line must have linear elongation OR connect directly to a round pore
+            if prop.eccentricity >= min_eccentricity or np.any(touches_pore > 0):
+                final_crack_mask = cv2.bitwise_or(final_crack_mask, single_line_mask)
+        return final_crack_mask
 
-    return final_crack_mask
-
-
-def crack_analysis(mask):
-    binary = mask > 0
-    skeleton = skeletonize(binary)
-    labels = measure.label(skeleton)
-    props = measure.regionprops(labels)
-
-    lengths = []
-    aspect_ratios = []
-    total_area = mask.shape[0] * mask.shape[1]
-
-    for prop in props:
-        if prop.area > 5:
-            lengths.append(prop.area)
-            major = prop.major_axis_length
-            minor = prop.minor_axis_length
-            ar = major / minor if minor != 0 else 0
-            aspect_ratios.append(ar)
-
-    mean_length = np.mean(lengths) if len(lengths) > 0 else 0
-    max_length = np.max(lengths) if len(lengths) > 0 else 0
-    mean_ar = np.mean(aspect_ratios) if len(aspect_ratios) > 0 else 0
-    density = len(lengths) / total_area if total_area > 0 else 0
-
-    return {
-        "lengths": lengths,
-        "mean_length": mean_length,
-        "max_length": max_length,
-        "mean_aspect_ratio": mean_ar,
-        "count": len(lengths),
-        "density": density
-    }
-
-
-def local_thickness_map(mask):
-    binary = mask > 0
-    if not np.any(binary):
-        return np.zeros_like(mask, dtype=float), 0.0
-    distance = distance_transform_edt(binary)
-    avg_thickness = np.mean(distance[binary]) * 2
-    return distance, avg_thickness
+    # Fallback configuration if no pores exist
+    return trace_mask
