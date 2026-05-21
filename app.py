@@ -1,124 +1,143 @@
 import streamlit as st
-import numpy as np
 import cv2
-from streamlit_cropper import st_cropper
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
 from PIL import Image
 
-# Page configuration
-st.set_page_config(page_title="Foreground Roughness Analyzer", layout="centered")
-
-st.title("🔬 Foreground Layer Surface Roughness Analyzer")
-st.write("Isolates the crisp main foreground layer and computes roughness metrics exclusively on it, ignoring blurry deeper layers.")
-
-# Sidebar Controls
-st.sidebar.header("Foreground Layer Selection")
-
-focus_threshold = st.sidebar.slider(
-    "Sharpness Threshold (Focus Filter)", 
-    min_value=5, 
-    max_value=150, 
-    value=35,
-    help="Higher values select only the absolute crispest foreground surfaces. Lower values allow slightly deeper struts to blend in."
+from utils.image_processing import (
+    preprocess_image,
+    segment_image,
+    calculate_porosity,
+    pore_analysis
 )
 
-intensity_scaling = st.sidebar.slider(
-    "Z-Axis Max Scale Calibration (µm)", 
-    min_value=1.0, 
-    max_value=500.0, 
-    value=100.0,
-    help="Maps the maximum pixel intensity change to a physical depth scale in micrometers."
+from utils.texture_analysis import texture_features
+from utils.fractal import fractal_dimension
+from utils.metrics import compare_samples
+
+
+st.set_page_config(layout="wide")
+
+st.title("Microscopy-Based Surface Porosity Analysis")
+
+st.markdown("""
+This app performs:
+- Surface porosity analysis
+- Texture characterization
+- Pore distribution analysis
+- Fractal roughness estimation
+""")
+
+uploaded_files = st.file_uploader(
+    "Upload microscopy images",
+    type=["png", "jpg", "jpeg", "tif"],
+    accept_multiple_files=True
 )
 
-uploaded_file = st.file_uploader("Upload material image...", type=["jpg", "jpeg", "png", "bmp", "tiff"])
+results = []
 
-if uploaded_file is not None:
-    pil_image = Image.open(uploaded_file)
-    
-    st.subheader("1. Define Target Evaluation Region")
-    cropped_pil = st_cropper(pil_image, realtime_update=True, box_color='#FF0000', aspect_ratio=None)
-    orig_img = cv2.cvtColor(np.array(cropped_pil), cv2.COLOR_RGB2BGR)
-    
-    # --- FOREGROUND ISOLATION PIPELINE ---
-    st.subheader("2. Foreground Segregation & Roughness Analysis")
-    
-    gray = cv2.cvtColor(orig_img, cv2.COLOR_BGR2GRAY)
-    
-    # Step 1: Calculate localized focus map using the Laplacian Operator
-    laplacian_map = cv2.Laplacian(gray, cv2.CV_64F, ksize=3)
-    laplacian_variance = np.abs(laplacian_map)
-    
-    # Smooth the sharpness map to create uniform solid regions for the foreground struts
-    focus_blurred = cv2.GaussianBlur(laplacian_variance, (11, 11), 0)
-    
-    # Create the Main Layer Mask (White = Main Layer, Black = Everything else)
-    _, main_layer_mask = cv2.threshold(focus_blurred, focus_threshold, 255, cv2.THRESH_BINARY)
-    main_layer_mask = main_layer_mask.astype(np.uint8)
-    
-    # Step 2: Extract Heights ONLY from the isolated Main Layer
-    height_map = (gray.astype(np.float32) / 255.0) * intensity_scaling
-    
-    # Extract height array values where the main layer mask is active
-    foreground_heights = height_map[main_layer_mask == 255]
-    
-    if len(foreground_heights) > 0:
-        # Step 3: Compute Roughness parameters on the isolated foreground data array
-        fg_mu = np.mean(foreground_heights)
-        fg_sa = np.mean(np.abs(foreground_heights - fg_mu))
-        fg_sq = np.sqrt(np.mean((foreground_heights - fg_mu) ** 2))
-        
-        # Step 4: Visual Generation
-        main_layer_view = orig_img.copy()
-        # Dim out the background layers to visually prove extraction isolation
-        main_layer_view[main_layer_mask == 0] = (main_layer_view[main_layer_mask == 0] * 0.25).astype(np.uint8)
-        
-        # Build a true foreground-only height map for display visualization
-        fg_height_display = np.zeros_like(height_map)
-        fg_height_display[main_layer_mask == 255] = height_map[main_layer_mask == 255]
-        
-        # Explicitly normalize and cast to 8-bit integer format (0-255 range)
-        fg_height_display_normalized = cv2.normalize(fg_height_display, None, 0, 255, cv2.NORM_MINMAX)
-        fg_height_display_int = np.uint8(fg_height_display_normalized)
-        
-        heatmap = cv2.applyColorMap(fg_height_display_int, cv2.COLORMAP_JET)
-        heatmap[main_layer_mask == 0] = 0 # Zero out background spaces in heatmap view
-        
-        # Explicitly convert the diagnostic focus map to integer layout to prevent Streamlit error
-        focus_blurred_normalized = cv2.normalize(focus_blurred, None, 0, 255, cv2.NORM_MINMAX)
-        focus_blurred_display = np.uint8(focus_blurred_normalized)
-        
-        # --- RENDER RESULTS PANEL ---
-        col1, col2 = st.columns(2)
-        with col1:
-            st.image(main_layer_view, channels="BGR", caption="Isolated Main Layer (Highlighted Surface)", width="stretch")
-        with col2:
-            st.image(heatmap, channels="BGR", caption="Main Layer Topography Heatmap", width="stretch")
-            
-        st.subheader("📊 Foreground Roughness Calculations")
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            st.metric(
-                label="Main Layer Roughness (Sa)", 
-                value=f"{fg_sa:.2f} µm",
-                help="Arithmetic mean height deviation restricted to the top in-focus strut surface."
-            )
-        with c2:
-            st.metric(
-                label="Main Layer Roughness (Sq)", 
-                value=f"{fg_sq:.2f} µm",
-                help="Root mean square height deviation restricted to the top in-focus strut surface."
-            )
-        with c3:
-            surface_coverage = (np.count_nonzero(main_layer_mask) / main_layer_mask.size) * 100
-            st.metric(
-                label="Main Layer Density Space", 
-                value=f"{surface_coverage:.1f} %",
-                help="Percentage of image area occupied by the topmost physical sponge layer."
-            )
-    else:
-        st.error("No foreground structural content isolated. Please lower the 'Sharpness Threshold' slider in the sidebar.")
-        
-    # Extra inspection views
-    with st.expander("Show Computer Vision Depth Extraction Map"):
-        st.image(focus_blurred_display, caption="Raw Local Edge Contrast Energy (Whiter = Closer to Camera)", width="stretch")
-else:
-    st.info("Upload your multi-layered sample view to run foreground layer segregation.")
+if uploaded_files:
+
+    for file in uploaded_files:
+
+        st.header(file.name)
+
+        image = Image.open(file)
+        image = np.array(image)
+
+        if len(image.shape) == 3:
+            gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+        else:
+            gray = image
+
+        st.subheader("Original Image")
+        st.image(gray, use_container_width=True)
+
+        blur_size = st.slider(
+            f"Gaussian Blur Kernel - {file.name}",
+            1,
+            15,
+            5,
+            step=2
+        )
+
+        threshold = st.slider(
+            f"Threshold - {file.name}",
+            0,
+            255,
+            120
+        )
+
+        processed = preprocess_image(gray, blur_size)
+
+        segmented = segment_image(processed, threshold)
+
+        st.subheader("Segmented Image")
+        st.image(segmented, use_container_width=True)
+
+        porosity = calculate_porosity(segmented)
+
+        pore_data = pore_analysis(segmented)
+
+        texture = texture_features(processed)
+
+        fractal = fractal_dimension(segmented)
+
+        metrics = {
+            "sample": file.name,
+            "porosity_percent": porosity,
+            "mean_pore_area": pore_data["mean_area"],
+            "pore_count": pore_data["count"],
+            "glcm_contrast": texture["contrast"],
+            "glcm_homogeneity": texture["homogeneity"],
+            "glcm_energy": texture["energy"],
+            "entropy": texture["entropy"],
+            "fractal_dimension": fractal
+        }
+
+        results.append(metrics)
+
+        st.subheader("Metrics")
+
+        df_single = pd.DataFrame([metrics])
+
+        st.dataframe(df_single)
+
+        st.subheader("Pore Size Distribution")
+
+        fig, ax = plt.subplots()
+
+        ax.hist(
+            pore_data["areas"],
+            bins=20
+        )
+
+        ax.set_xlabel("Pore Area")
+        ax.set_ylabel("Frequency")
+
+        st.pyplot(fig)
+
+    if len(results) > 1:
+
+        st.header("Sample Comparison")
+
+        comparison_df = pd.DataFrame(results)
+
+        st.dataframe(comparison_df)
+
+        st.subheader("Porosity Comparison")
+
+        fig2, ax2 = plt.subplots()
+
+        ax2.bar(
+            comparison_df["sample"],
+            comparison_df["porosity_percent"]
+        )
+
+        ax2.set_ylabel("Porosity (%)")
+
+        plt.xticks(rotation=45)
+
+        st.pyplot(fig2)
