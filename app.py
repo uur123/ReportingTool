@@ -26,8 +26,7 @@ st.set_page_config(layout="wide")
 st.title("Porous Ceramic Structural Integrity Analyzer")
 
 st.markdown("""
-This application performs structural, pore, and crack morphological tracking.
-It features a focus-plane layer isolation tool designed for open-cell sponge matrices.
+This application tracks structural defects by filtering out broken pores and verifying crack networks via pore connectivity.
 """)
 
 uploaded_files = st.file_uploader(
@@ -40,25 +39,19 @@ results = []
 
 if uploaded_files:
     st.sidebar.header("1. General Processing")
-    blur_size = st.sidebar.slider("Gaussian Blur Radius", 1, 15, 5, step=2)
+    blur_size = st.sidebar.slider("Gaussian Blur Radius", 1, 15, 3, step=2)
     threshold = st.sidebar.slider("Pore Segmentation Threshold", 0, 255, 120)
 
-    # --- NEW SPONGE FOCUS LAYER FILTER CONTROLS ---
-    st.sidebar.header("2. Sponge 3D Layer Isolator")
-    top_layer_focus = st.sidebar.checkbox("Focus Only on Top Layer", value=True)
-    focus_sensitivity = st.sidebar.slider("Focus Filter Sensitivity", 1, 100, 15, 
-                                          help="Lower ignores more depth blur. Higher allows deeper layers.")
-
-    st.sidebar.header("3. Strut Zone Calibration")
+    st.sidebar.header("2. Strut Zone Calibration")
     strut_threshold = st.sidebar.slider("Strut Grey-level Threshold", 0, 255, 40)
     strut_invert = st.sidebar.checkbox("Invert Strut Logic (Check if struts are dark)", value=False)
 
-    st.sidebar.header("4. Crack Filter Tweaking")
+    st.sidebar.header("3. Crack Connectivity Tweaking")
     crack_polarity = st.sidebar.selectbox("Crack Contrast Type", ["Dark Cracks", "Bright Cracks"])
-    crack_threshold = st.sidebar.slider("Crack Sensitivity (Hessian Cutoff)", 1, 200, 40)
-    crack_sigma = st.sidebar.slider("Target Crack Width (Sigma)", 0.5, 5.0, 1.0, step=0.1)
-    min_eccentricity = st.sidebar.slider("Minimum Elongation (Eccentricity)", 0.50, 0.99, 0.75, step=0.05)
-    min_crack_size = st.sidebar.slider("Minimum Crack Size (Pixels)", 1, 50, 3)
+    crack_threshold = st.sidebar.slider("Crack Sensitivity (Tracing Intensity)", 1, 255, 30)
+    crack_sigma = st.sidebar.slider("Target Crack Width (Pixels)", 1.0, 15.0, 3.0, step=1.0)
+    min_eccentricity = st.sidebar.slider("Minimum Elongation (Eccentricity)", 0.50, 0.99, 0.70, step=0.05)
+    min_crack_size = st.sidebar.slider("Minimum Crack Size (Pixels)", 1, 100, 5)
 
     for file in uploaded_files:
         st.header(file.name)
@@ -81,9 +74,11 @@ if uploaded_files:
             st.subheader("Processed")
             st.image(processed, use_container_width=True)
 
+        # Segment pores first - the update automatically purges broken pores in the loop
         pore_mask = segment_pores(processed, threshold)
+        pore_data = pore_analysis(pore_mask)
 
-        # Execute surface-focused crack detection
+        # Run connectivity-based crack detection tracking
         crack_mask = detect_cracks(
             processed, 
             threshold=crack_threshold, 
@@ -93,22 +88,19 @@ if uploaded_files:
             crack_polarity=crack_polarity,
             crack_sigma=crack_sigma,
             min_eccentricity=min_eccentricity,
-            min_crack_size=min_crack_size,
-            top_layer_focus=top_layer_focus,
-            focus_sensitivity=focus_sensitivity
+            min_crack_size=min_crack_size
         )
 
         col3, col4 = st.columns(2)
         with col3:
-            st.subheader("Pore Segmentation Mask")
+            st.subheader("Cleaned Round Pores Mask")
             st.image(pore_mask, use_container_width=True)
         with col4:
-            st.subheader("Crack Segmentation Mask")
+            st.subheader("Connected Crack Mask")
             st.image(crack_mask, use_container_width=True)
 
-        # Metric Analytics Calculations
+        # Analytics calculations
         porosity = calculate_porosity(pore_mask)
-        pore_data = pore_analysis(pore_mask)
         crack_data = crack_analysis(crack_mask)
         texture = texture_features(processed)
         fractal = fractal_dimension(pore_mask)
@@ -145,15 +137,11 @@ if uploaded_files:
         st.subheader("Pore Size Distribution")
         fig1, ax1 = plt.subplots()
         ax1.hist(pore_data["areas"], bins=20 if len(pore_data["areas"]) > 0 else 5)
-        ax1.set_xlabel("Pore Area")
-        ax1.set_ylabel("Frequency")
         st.pyplot(fig1)
 
         st.subheader("Crack Length Distribution")
         fig2, ax2 = plt.subplots()
         ax2.hist(crack_data["lengths"], bins=20 if len(crack_data["lengths"]) > 0 else 5)
-        ax2.set_xlabel("Crack Length")
-        ax2.set_ylabel("Frequency")
         st.pyplot(fig2)
 
         st.subheader("Local Thickness Map")
@@ -174,6 +162,3 @@ if uploaded_files:
             title="Structural Weakness Index Comparison"
         )
         st.plotly_chart(fig4, use_container_width=True)
-
-        csv = comparison_df.to_csv(index=False)
-        st.download_button("Download CSV Summary", csv, "analysis_results.csv", "text/csv")
