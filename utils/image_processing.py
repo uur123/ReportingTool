@@ -65,50 +65,62 @@ def pore_analysis(mask):
 
 def detect_cracks(image, threshold=80, pore_mask=None):
     """
-    Detects internal cracks within ceramic struts using Hessian Ridge Analysis.
-    Ignores structural boundaries and pores completely.
+    Diagnostic-enabled Hessian crack detector. 
+    Allows tuning for dark-on-light or light-on-dark crack structures.
     """
-    # 1. Segment the Ceramic Struts (Assume struts are the lighter/mid-tone material)
-    # Adjust this if your struts are darker than the background
-    _, strut_mask = cv2.threshold(image, 50, 255, cv2.THRESH_BINARY)
+    # 1. Segment the Ceramic Struts (Ensure threshold matches your strut color)
+    # If your struts are dark, change cv2.THRESH_BINARY to cv2.THRESH_BINARY_INV
+    _, strut_mask = cv2.threshold(image, 40, 255, cv2.THRESH_BINARY)
     
-    # 2. Isolate internal strut body by removing pores and eroding boundaries
+    # 2. Build the Safe Strut Zone
     if pore_mask is not None:
         strut_body = cv2.bitwise_and(strut_mask, cv2.bitwise_not(pore_mask))
     else:
         strut_body = strut_mask.copy()
         
-    # Erode the strut mask to pull away from outer edges/boundaries
-    kernel_erode = np.ones((5, 5), np.uint8)
-    safe_strut_zone = cv2.erode(strut_body, kernel_erode, iterations=2)
+    # Keep erosion minimal (3x3 instead of 5x5) so we don't accidentally erase narrow struts
+    kernel_erode = np.ones((3, 3), np.uint8)
+    safe_strut_zone = cv2.erode(strut_body, kernel_erode, iterations=1)
 
-    # 3. Use Hessian Matrix Eigenvalues to find thin line valleys (ridges) instead of Canny edges
-    # This prevents catching boundaries and looks for thin, linear dark structures
-    hxx, hxy, hyy = hessian_matrix(image, sigma=1.5)
+    # 3. Calculate Hessian Matrix
+    # Lower sigma (e.g., 1.0) catches thinner, sharper cracks
+    hxx, hxy, hyy = hessian_matrix(image, sigma=1.0)
     i1, i2 = hessian_matrix_eigvals([hxx, hxy, hyy])
     
-    # i1 represents the maximal local curvature. Cracks show up as strong positive/negative peaks.
-    # We look for dark line structures on a lighter strut background
-    ridge_map = np.where(i1 > (threshold / 10.0), 255, 0).astype(np.uint8)
+    # --- CONTRAST SELECTION ---
+    # OPTION A: Use 'i1' if your cracks are DARK lines on a LIGHT material background.
+    # OPTION B: Use 'i2' if your cracks are LIGHT lines on a DARK material background.
+    # Change 'i1' below to 'i2' if your crack lines are bright/white.
+    raw_intensity = i1 
 
-    # 4. Strictly constrain cracks to the inside of the safe strut zones
+    # Convert threshold to fit Hessian scale. Lowering this value captures fainter lines.
+    hessian_cutoff = threshold / 50.0
+    ridge_map = np.where(raw_intensity > hessian_cutoff, 255, 0).astype(np.uint8)
+
+    # 4. Restrict features to the interior of our struts
     valid_cracks = cv2.bitwise_and(ridge_map, safe_strut_zone)
 
-    # 5. Filter out remaining non-elongated noise
+    # 5. Geometrical filtering
     labeled_cracks = measure.label(valid_cracks > 0)
     props = measure.regionprops(labeled_cracks)
     
     final_crack_mask = np.zeros_like(valid_cracks)
+    
+    # Terminal debug print statement to find out why shapes are being discarded
+    print(f"[DEBUG] Found {len(props)} total raw ridge segments before shape filtering.")
+
     for prop in props:
-        if prop.area < 8: # Filter out tiny noise dots
+        # Lowered size limit to 3 pixels so short/faint cracks are not deleted
+        if prop.area < 3: 
             continue
-        # Only keep elongated features (cracks)
-        if prop.eccentricity > 0.88:
+            
+        # RELAXED RULES: Lowered required eccentricity from 0.88 to 0.75 
+        # Left solidity check open so branching/crooked cracks pass through safely
+        if prop.eccentricity > 0.75:
             for coord in prop.coords:
                 final_crack_mask[coord[0], coord[1]] = 255
 
     return final_crack_mask
-
 
 def crack_analysis(mask):
     binary = mask > 0
