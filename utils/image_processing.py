@@ -1,4 +1,3 @@
-
 import cv2
 import numpy as np
 
@@ -82,19 +81,48 @@ def pore_analysis(mask):
     }
 
 
-def detect_cracks(image, threshold=80):
-
+def detect_cracks(image, threshold=80, pore_mask=None):
+    """
+    Detects cracks by extracting edges and applying shape-based filters 
+    to remove circular or solid pore artifacts.
+    """
+    # 1. Base edge detection
     edges = cv2.Canny(
         image,
         threshold,
         threshold * 2
     )
 
-    kernel = np.ones((3, 3), np.uint8)
+    # 2. Subtract the pore regions so we only focus on the ceramic struts
+    if pore_mask is not None:
+        # Dilate pore mask slightly to ensure pore boundaries are entirely removed
+        kernel_pore = np.ones((3, 3), np.uint8)
+        dilated_pores = cv2.dilate(pore_mask, kernel_pore, iterations=1)
+        edges = cv2.bitwise_and(edges, cv2.bitwise_not(dilated_pores))
 
-    edges = cv2.dilate(edges, kernel, iterations=1)
+    # 3. Morphological closing to bridge small gaps in the cracks
+    kernel_edges = np.ones((3, 3), np.uint8)
+    edges = cv2.dilate(edges, kernel_edges, iterations=1)
 
-    return edges
+    # 4. Filter connected components based on crack geometry (long and thin)
+    labeled_edges = measure.label(edges > 0)
+    props = measure.regionprops(labeled_edges)
+    
+    cleaned_crack_mask = np.zeros_like(edges)
+
+    for prop in props:
+        # Ignore tiny noise artifacts
+        if prop.area < 5:
+            continue
+            
+        # Eccentricity ranges from 0 (perfect circle) to 1 (straight line)
+        # Solidity checks how compact the shape is (pores = high, cracks = low)
+        if prop.eccentricity > 0.85 and prop.solidity < 0.6:
+            # Reconstruct the validated crack back into our binary mask
+            for coord in prop.coords:
+                cleaned_crack_mask[coord[0], coord[1]] = 255
+
+    return cleaned_crack_mask
 
 
 def crack_analysis(mask):
