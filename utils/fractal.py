@@ -1,3 +1,4 @@
+
 import numpy as np
 
 
@@ -24,13 +25,22 @@ def fractal_dimension(image):
 
     Z = Z[:n, :n]
 
-    sizes = 2 ** np.arange(int(np.log(n) / np.log(2)), 1, -1)
+    sizes = 2 ** np.arange(
+        int(np.log(n) / np.log(2)),
+        1,
+        -1
+    )
 
     counts = []
 
     for size in sizes:
+
         counts.append(boxcount(Z, size))
 
-    coeffs = np.polyfit(np.log(sizes), np.log(counts), 1)
+    coeffs = np.polyfit(
+        np.log(sizes),
+        np.log(counts),
+        1
+    )
 
     return -coeffs[0]
