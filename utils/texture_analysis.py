@@ -1,3 +1,4 @@
+
 import numpy as np
 
 from skimage.feature import graycomatrix
@@ -17,11 +18,11 @@ def texture_features(image):
         normed=True
     )
 
-    contrast = graycoprops(glcm, 'contrast')[0, 0]
+    contrast = graycoprops(glcm, "contrast")[0, 0]
 
-    homogeneity = graycoprops(glcm, 'homogeneity')[0, 0]
+    homogeneity = graycoprops(glcm, "homogeneity")[0, 0]
 
-    energy = graycoprops(glcm, 'energy')[0, 0]
+    energy = graycoprops(glcm, "energy")[0, 0]
 
     entropy = shannon_entropy(image)
 
