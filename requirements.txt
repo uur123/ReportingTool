@@ -1,9 +1,9 @@
 streamlit
-pandas
-pillow
-fpdf2
-streamlit
+opencv-python
 numpy
-opencv-python-headless
-streamlit-cropper
-
+pandas
+matplotlib
+scikit-image
+scipy
+plotly
+Pillow
